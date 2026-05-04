@@ -1,8 +1,9 @@
 import fp from 'fastify-plugin';
+import type { FastifyInstance } from 'fastify';
 import { HermesService } from '../services/hermes.service.js';
 import config from '../config/index.js';
 
-async function hermesPlugin(fastify) {
+async function hermesPlugin(fastify: FastifyInstance): Promise<void> {
   const hermes = new HermesService({
     apiUrl: config.hermes.apiUrl,
     apiKey: config.hermes.apiKey,

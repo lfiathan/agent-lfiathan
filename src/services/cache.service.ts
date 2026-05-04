@@ -1,72 +1,52 @@
+import type { Redis } from 'ioredis';
+
 /**
  * Reusable Redis caching service with read-through pattern
  * and namespace-based key management.
  */
 export class CacheService {
-  /**
-   * @param {import('ioredis').Redis} redis
-   * @param {object} [options]
-   * @param {number} [options.defaultTTL=300] Default TTL in seconds
-   */
-  constructor(redis, options = {}) {
+  private readonly redis: Redis;
+  private readonly defaultTTL: number;
+
+  constructor(redis: Redis, options: { defaultTTL?: number } = {}) {
     this.redis = redis;
     this.defaultTTL = options.defaultTTL || 300;
   }
 
-  /**
-   * Get a cached value.
-   * @param {string} key
-   * @returns {Promise<any|null>}
-   */
-  async get(key) {
+  async get<T = unknown>(key: string): Promise<T | null> {
     const raw = await this.redis.get(key);
     if (raw === null) return null;
     try {
-      return JSON.parse(raw);
+      return JSON.parse(raw) as T;
     } catch {
-      return raw;
+      return raw as T;
     }
   }
 
-  /**
-   * Set a cached value.
-   * @param {string} key
-   * @param {any} value
-   * @param {number} [ttl] TTL in seconds
-   */
-  async set(key, value, ttl) {
+  async set(key: string, value: unknown, ttl?: number): Promise<void> {
     const serialized = JSON.stringify(value);
     const expiry = ttl || this.defaultTTL;
     await this.redis.set(key, serialized, 'EX', expiry);
   }
 
-  /**
-   * Delete a specific key.
-   * @param {string} key
-   */
-  async del(key) {
+  async del(key: string): Promise<void> {
     await this.redis.del(key);
   }
 
   /**
    * Delete all keys matching a pattern.
    * Uses SCAN to avoid blocking Redis.
-   * @param {string} pattern - e.g. 'users:*'
    */
-  async delPattern(pattern) {
-    // ioredis keyPrefix is automatically prepended,
-    // so we need to scan with the raw pattern
+  async delPattern(pattern: string): Promise<number> {
     const stream = this.redis.scanStream({ match: pattern, count: 100 });
 
     return new Promise((resolve, reject) => {
       const pipeline = this.redis.pipeline();
       let count = 0;
 
-      stream.on('data', (keys) => {
+      stream.on('data', (keys: string[]) => {
         for (const key of keys) {
-          // Keys from scanStream include the prefix, but del with keyPrefix
-          // would double-prefix. Use the raw key with unPrefix.
-          const unprefixed = this._stripPrefix(key);
+          const unprefixed = this.stripPrefix(key);
           pipeline.del(unprefixed);
           count++;
         }
@@ -85,14 +65,9 @@ export class CacheService {
    * Read-through cache pattern.
    * Returns cached value if available, otherwise calls fetchFn,
    * caches the result, and returns it.
-   *
-   * @param {string} key
-   * @param {() => Promise<any>} fetchFn
-   * @param {number} [ttl]
-   * @returns {Promise<any>}
    */
-  async getOrSet(key, fetchFn, ttl) {
-    const cached = await this.get(key);
+  async getOrSet<T>(key: string, fetchFn: () => Promise<T>, ttl?: number): Promise<T> {
+    const cached = await this.get<T>(key);
     if (cached !== null) return cached;
 
     const fresh = await fetchFn();
@@ -102,12 +77,7 @@ export class CacheService {
     return fresh;
   }
 
-  /**
-   * Strip the ioredis keyPrefix from a raw Redis key.
-   * @param {string} key
-   * @returns {string}
-   */
-  _stripPrefix(key) {
+  private stripPrefix(key: string): string {
     const prefix = this.redis.options?.keyPrefix || '';
     if (prefix && key.startsWith(prefix)) {
       return key.slice(prefix.length);
@@ -119,13 +89,13 @@ export class CacheService {
 /* ── Cache key helpers ────────────────────────────────── */
 
 export const CacheKeys = {
-  user: (id) => `users:${id}`,
-  userByEmail: (email) => `users:email:${email}`,
+  user: (id: string) => `users:${id}`,
+  userByEmail: (email: string) => `users:email:${email}`,
   userList: () => 'users:list',
   usersPattern: () => 'users:*',
 
-  task: (id) => `tasks:${id}`,
-  tasksByUser: (userId) => `tasks:user:${userId}`,
+  task: (id: string) => `tasks:${id}`,
+  tasksByUser: (userId: string) => `tasks:user:${userId}`,
   tasksPattern: () => 'tasks:*',
-  tasksUserPattern: (userId) => `tasks:user:${userId}:*`,
+  tasksUserPattern: (userId: string) => `tasks:user:${userId}:*`,
 };

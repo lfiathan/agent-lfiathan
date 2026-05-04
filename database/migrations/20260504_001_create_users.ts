@@ -1,8 +1,6 @@
-/**
- * @param {import('knex').Knex} knex
- */
-export async function up(knex) {
-  // Enable uuid generation
+import type { Knex } from 'knex';
+
+export async function up(knex: Knex): Promise<void> {
   await knex.raw('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
 
   await knex.schema.createTable('users', (table) => {
@@ -10,13 +8,10 @@ export async function up(knex) {
     table.string('email', 255).notNullable().unique();
     table.string('name', 255).notNullable();
     table.jsonb('metadata').notNullable().defaultTo('{}');
-    table.timestamps(true, true); // created_at, updated_at with defaults
+    table.timestamps(true, true);
   });
 }
 
-/**
- * @param {import('knex').Knex} knex
- */
-export async function down(knex) {
+export async function down(knex: Knex): Promise<void> {
   await knex.schema.dropTableIfExists('users');
 }

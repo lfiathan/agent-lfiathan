@@ -1,7 +1,6 @@
-/**
- * @param {import('knex').Knex} knex
- */
-export async function up(knex) {
+import type { Knex } from 'knex';
+
+export async function up(knex: Knex): Promise<void> {
   await knex.schema.createTable('tasks', (table) => {
     table.uuid('id').primary().defaultTo(knex.raw('gen_random_uuid()'));
     table
@@ -19,16 +18,12 @@ export async function up(knex) {
     table.timestamp('due_date').nullable();
     table.timestamps(true, true);
 
-    // Indexes for common queries
     table.index('user_id', 'idx_tasks_user_id');
     table.index('status', 'idx_tasks_status');
     table.index('category', 'idx_tasks_category');
   });
 }
 
-/**
- * @param {import('knex').Knex} knex
- */
-export async function down(knex) {
+export async function down(knex: Knex): Promise<void> {
   await knex.schema.dropTableIfExists('tasks');
 }

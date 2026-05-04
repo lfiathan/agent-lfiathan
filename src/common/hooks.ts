@@ -1,13 +1,16 @@
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { AppError } from './errors.js';
+
+interface FastifyValidationError extends Error {
+  validation?: unknown[];
+}
 
 /**
  * Global error handler for Fastify.
  * Maps AppError instances to structured JSON responses.
- *
- * @param {import('fastify').FastifyInstance} fastify
  */
-export function registerErrorHandler(fastify) {
-  fastify.setErrorHandler((error, request, reply) => {
+export function registerErrorHandler(fastify: FastifyInstance): void {
+  fastify.setErrorHandler((error: FastifyValidationError, request: FastifyRequest, reply: FastifyReply) => {
     // Handle our custom errors
     if (error instanceof AppError) {
       return reply.status(error.statusCode).send({
@@ -44,15 +47,14 @@ export function registerErrorHandler(fastify) {
 }
 
 /**
- * Register a request ID hook for tracing.
- * @param {import('fastify').FastifyInstance} fastify
+ * Register request timing hooks.
  */
-export function registerRequestHooks(fastify) {
-  fastify.addHook('onRequest', async (request) => {
+export function registerRequestHooks(fastify: FastifyInstance): void {
+  fastify.addHook('onRequest', async (request: FastifyRequest) => {
     request.startTime = Date.now();
   });
 
-  fastify.addHook('onResponse', async (request, reply) => {
+  fastify.addHook('onResponse', async (request: FastifyRequest, reply: FastifyReply) => {
     const duration = Date.now() - request.startTime;
     request.log.info(
       { method: request.method, url: request.url, statusCode: reply.statusCode, duration },

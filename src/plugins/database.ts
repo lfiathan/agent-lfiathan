@@ -1,9 +1,10 @@
 import fp from 'fastify-plugin';
-import knex from 'knex';
+import type { FastifyInstance } from 'fastify';
+import knex, { type Knex } from 'knex';
 import config from '../config/index.js';
 
-async function databasePlugin(fastify) {
-  const knexConfig = {
+async function databasePlugin(fastify: FastifyInstance): Promise<void> {
+  const knexConfig: Knex.Config = {
     client: 'pg',
     connection: {
       host: config.database.host,

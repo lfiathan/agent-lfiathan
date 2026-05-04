@@ -1,13 +1,14 @@
 import fp from 'fastify-plugin';
-import Redis from 'ioredis';
+import type { FastifyInstance } from 'fastify';
+import { Redis } from 'ioredis';
 import config from '../config/index.js';
 
-async function redisPlugin(fastify) {
+async function redisPlugin(fastify: FastifyInstance): Promise<void> {
   const redis = new Redis(config.redis.url, {
     keyPrefix: config.redis.keyPrefix,
     maxRetriesPerRequest: 3,
-    retryStrategy(times) {
-      if (times > 5) return null; // Stop retrying
+    retryStrategy(times: number): number | null {
+      if (times > 5) return null;
       return Math.min(times * 200, 2000);
     },
     lazyConnect: true,

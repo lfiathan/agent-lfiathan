@@ -2,13 +2,13 @@ import 'dotenv/config';
 import config, { validateConfig } from './config/index.js';
 import { buildApp } from './app.js';
 
-async function main() {
+async function main(): Promise<void> {
   validateConfig();
 
   const app = await buildApp();
 
   // Graceful shutdown
-  const signals = ['SIGINT', 'SIGTERM'];
+  const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
   for (const signal of signals) {
     process.on(signal, async () => {
       app.log.info(`Received ${signal}, shutting down gracefully...`);

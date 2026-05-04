@@ -1,12 +1,9 @@
-/**
- * @param {import('knex').Knex} knex
- */
-export async function seed(knex) {
-  // Clean existing data
+import type { Knex } from 'knex';
+
+export async function seed(knex: Knex): Promise<void> {
   await knex('tasks').del();
   await knex('users').del();
 
-  // Insert demo users
   const [user1, user2] = await knex('users')
     .insert([
       {
@@ -22,7 +19,6 @@ export async function seed(knex) {
     ])
     .returning('*');
 
-  // Insert demo tasks
   await knex('tasks').insert([
     {
       user_id: user1.id,

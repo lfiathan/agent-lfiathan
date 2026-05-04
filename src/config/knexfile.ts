@@ -1,19 +1,20 @@
 import 'dotenv/config';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import type { Knex } from 'knex';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..', '..');
 
-const connection = {
+const connection: Knex.PgConnectionConfig = {
   host: process.env.DB_HOST,
-  port: process.env.DB_PORT,
+  port: parseInt(process.env.DB_PORT ?? '5432', 10),
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
 };
 
-const commonConfig = {
+const commonConfig: Knex.Config = {
   client: 'pg',
   connection,
   pool: {
@@ -29,14 +30,12 @@ const commonConfig = {
   },
 };
 
-/** @type {import('knex').Knex.Config} */
-export const development = {
+export const development: Knex.Config = {
   ...commonConfig,
   debug: false,
 };
 
-/** @type {import('knex').Knex.Config} */
-export const production = {
+export const production: Knex.Config = {
   ...commonConfig,
   pool: {
     min: 5,
