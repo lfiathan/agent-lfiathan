@@ -79,9 +79,8 @@ services:
       - "${HERMES_PORT:-8642}:8642"
     volumes:
       - ./hermes:/opt/data
-    environment:
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - HERMES_API_KEY=${HERMES_API_KEY:-}
+    env_file:
+      - ./hermes/.env
     networks:
       - lfiathan-net
     deploy:
