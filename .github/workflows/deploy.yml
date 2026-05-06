@@ -1,0 +1,137 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: "Skip build/test step"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+env:
+  DEPLOY_PATH: /opt/agent-lfiathan
+  NODE_VERSION: "22"
+
+jobs:
+  # ─── Job 1: Build & Test ─────────────────────────────
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.skip_tests != 'true' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Build project
+        run: npm run build
+
+      - name: Build MCP server
+        working-directory: mcp/github-pipeline
+        run: |
+          npm ci
+          npm run build
+
+  # ─── Job 2: Deploy to VPS ───────────────────────────
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    needs: [build-and-test]
+    if: always() && (needs.build-and-test.result == 'success' || needs.build-and-test.result == 'skipped')
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+
+            DEPLOY_DIR="${{ env.DEPLOY_PATH }}"
+
+            echo "═══ Deploying agent-lfiathan ═══"
+            echo "Time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo "Directory: ${DEPLOY_DIR}"
+
+            # ── Clone if first deploy ──
+            if [ ! -d "${DEPLOY_DIR}/.git" ]; then
+              echo "→ First deploy, cloning repository..."
+              mkdir -p "${DEPLOY_DIR}"
+              git clone https://github.com/${{ github.repository }}.git "${DEPLOY_DIR}"
+            fi
+
+            cd "${DEPLOY_DIR}"
+
+            # ── Pull latest code ──
+            echo "→ Pulling latest changes..."
+            git fetch origin main
+            git checkout main
+            git reset --hard origin/main
+
+            # ── Ensure .env exists ──
+            if [ ! -f .env ]; then
+              echo "⚠ No .env file found. Creating from .env.example..."
+              cp .env.example .env
+              echo "⚠ Please update .env with production values!"
+            fi
+
+            # ── Build & restart containers ──
+            echo "→ Building and starting containers..."
+            docker compose pull
+            docker compose up -d --build --remove-orphans
+
+            # ── Wait for services to be healthy ──
+            echo "→ Waiting for services to start..."
+            sleep 15
+
+            # ── Run database migrations ──
+            echo "→ Running database migrations..."
+            docker compose exec -T app node dist/node_modules/.bin/knex \
+              --knexfile dist/src/config/knexfile.js \
+              migrate:latest || echo "⚠ Migration failed or no pending migrations"
+
+            # ── Health check ──
+            echo "→ Running health check..."
+            for i in 1 2 3 4 5; do
+              if curl -sf http://localhost:3000/health > /dev/null 2>&1; then
+                echo "✓ Health check passed!"
+                break
+              fi
+              if [ "$i" -eq 5 ]; then
+                echo "✗ Health check failed after 5 attempts"
+                docker compose logs --tail=50 app
+                exit 1
+              fi
+              echo "  Attempt $i/5 failed, retrying in 5s..."
+              sleep 5
+            done
+
+            # ── Show status ──
+            echo ""
+            echo "═══ Deployment Complete ═══"
+            docker compose ps
+            echo ""
+            echo "Commit: $(git rev-parse --short HEAD)"
+            echo "Time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"

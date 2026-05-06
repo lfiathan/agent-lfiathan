@@ -10,3 +10,7 @@ build/
 .vscode/
 coverage/
 hermes/
+
+# MCP build artifacts
+mcp/*/dist/
+mcp/*/node_modules/
