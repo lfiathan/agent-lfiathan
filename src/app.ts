@@ -12,9 +12,6 @@ import userRoutes from './modules/users/user.routes.js';
 import taskRoutes from './modules/tasks/task.routes.js';
 import agentRoutes from './modules/agents/agent.routes.js';
 
-// Import type augmentations
-import './types/fastify.js';
-
 export async function buildApp(opts: { logLevel?: string } = {}) {
   const fastify = Fastify({
     logger: {
