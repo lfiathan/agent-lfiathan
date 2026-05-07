@@ -1,6 +1,5 @@
 import type { Knex } from 'knex';
 import type { Redis } from 'ioredis';
-import type { HermesService } from '../services/hermes.service.js';
 
 export interface AppConfig {
   env: string;
@@ -20,19 +19,12 @@ export interface AppConfig {
     keyPrefix: string;
     defaultTTL: number;
   };
-  hermes: {
-    apiUrl: string;
-    apiKey: string;
-    model: string;
-    timeout: number;
-  };
 }
 
 declare module 'fastify' {
   interface FastifyInstance {
     knex: Knex;
     redis: Redis;
-    hermes: HermesService;
     config: AppConfig;
   }
 

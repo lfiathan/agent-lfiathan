@@ -10,6 +10,7 @@ build/
 .vscode/
 coverage/
 hermes/
+.claude/
 
 # MCP build artifacts
 mcp/*/dist/

@@ -23,13 +23,6 @@ const config: AppConfig = {
     keyPrefix: process.env.REDIS_KEY_PREFIX || 'lfiathan:',
     defaultTTL: parseInt(process.env.REDIS_DEFAULT_TTL ?? '300', 10),
   },
-
-  hermes: {
-    apiUrl: process.env.HERMES_API_URL || 'http://localhost:8642',
-    apiKey: process.env.HERMES_API_KEY || '',
-    model: process.env.HERMES_MODEL || 'minimax/minimax-m2.5:free',
-    timeout: parseInt(process.env.HERMES_TIMEOUT ?? '30000', 10),
-  },
 };
 
 /** Validate required config in production */
@@ -39,9 +32,6 @@ export function validateConfig(): void {
   if (config.env === 'production') {
     if (!config.database.password || config.database.password === 'lfiathan_secret') {
       errors.push('DB_PASSWORD must be set in production');
-    }
-    if (!config.hermes.apiKey) {
-      errors.push('HERMES_API_KEY must be set in production');
     }
   }
 
