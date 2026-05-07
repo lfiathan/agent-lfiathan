@@ -27,9 +27,3 @@ export class ConflictError extends AppError {
     super(message, 409, 'CONFLICT');
   }
 }
-
-export class HermesUnavailableError extends AppError {
-  constructor(message = 'Hermes agent is currently unavailable') {
-    super(message, 503, 'HERMES_UNAVAILABLE');
-  }
-}

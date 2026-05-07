@@ -5,12 +5,13 @@ import sensible from '@fastify/sensible';
 import config from './config/index.js';
 import databasePlugin from './plugins/database.js';
 import redisPlugin from './plugins/redis.js';
-import hermesPlugin from './plugins/hermes.js';
 import { registerErrorHandler, registerRequestHooks } from './common/hooks.js';
 
 import userRoutes from './modules/users/user.routes.js';
 import taskRoutes from './modules/tasks/task.routes.js';
-import agentRoutes from './modules/agents/agent.routes.js';
+import transactionRoutes from './modules/finance/transaction.routes.js';
+import portfolioRoutes from './modules/finance/portfolio.routes.js';
+import dietaryRoutes from './modules/dietary/dietary.routes.js';
 
 export async function buildApp(opts: { logLevel?: string } = {}) {
   const fastify = Fastify({
@@ -24,7 +25,6 @@ export async function buildApp(opts: { logLevel?: string } = {}) {
     genReqId: () => crypto.randomUUID(),
   });
 
-  // Store config on instance for access in hooks
   fastify.decorate('config', config);
 
   // ── Plugins ──────────────────────────────────────
@@ -32,7 +32,6 @@ export async function buildApp(opts: { logLevel?: string } = {}) {
   await fastify.register(sensible);
   await fastify.register(databasePlugin);
   await fastify.register(redisPlugin);
-  await fastify.register(hermesPlugin);
 
   // ── Hooks ────────────────────────────────────────
   registerErrorHandler(fastify);
@@ -50,12 +49,6 @@ export async function buildApp(opts: { logLevel?: string } = {}) {
       .then(() => true)
       .catch(() => false);
 
-    let hermesOk = false;
-    try {
-      const h = await fastify.hermes.getHealth();
-      hermesOk = h.available;
-    } catch { /* ignored */ }
-
     const status = dbOk && redisOk ? 'ok' : 'degraded';
 
     return {
@@ -63,7 +56,6 @@ export async function buildApp(opts: { logLevel?: string } = {}) {
       services: {
         database: dbOk ? 'connected' : 'disconnected',
         redis: redisOk ? 'connected' : 'disconnected',
-        hermes: hermesOk ? 'available' : 'unavailable',
       },
       timestamp: new Date().toISOString(),
     };
@@ -72,7 +64,9 @@ export async function buildApp(opts: { logLevel?: string } = {}) {
   // ── Routes ───────────────────────────────────────
   await fastify.register(userRoutes, { prefix: '/api/users' });
   await fastify.register(taskRoutes, { prefix: '/api/tasks' });
-  await fastify.register(agentRoutes, { prefix: '/api/agents' });
+  await fastify.register(transactionRoutes, { prefix: '/api/transactions' });
+  await fastify.register(portfolioRoutes, { prefix: '/api/portfolio' });
+  await fastify.register(dietaryRoutes, { prefix: '/api/dietary' });
 
   return fastify;
 }

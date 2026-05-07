@@ -51,7 +51,6 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-lfiathan_secret}
       DB_NAME: ${DB_NAME:-agent_lfiathan}
       REDIS_URL: redis://redis:6379
-      HERMES_API_URL: http://hermes:8642
     ports:
       - "${PORT:-3000}:3000"
     depends_on:
@@ -69,25 +68,6 @@ services:
         limits:
           memory: 1G
           cpus: "1.0"
-
-  hermes:
-    image: nousresearch/hermes-agent:latest
-    container_name: lfiathan-hermes
-    restart: unless-stopped
-    command: gateway run
-    ports:
-      - "${HERMES_PORT:-8642}:8642"
-    volumes:
-      - ./hermes:/opt/data
-    env_file:
-      - ./hermes/.env
-    networks:
-      - lfiathan-net
-    deploy:
-      resources:
-        limits:
-          memory: 4G
-          cpus: "${HERMES_CPUS:-1.0}"
 
 volumes:
   pgdata:

@@ -98,4 +98,15 @@ export const CacheKeys = {
   tasksByUser: (userId: string) => `tasks:user:${userId}`,
   tasksPattern: () => 'tasks:*',
   tasksUserPattern: (userId: string) => `tasks:user:${userId}:*`,
+
+  transaction: (id: string) => `transactions:${id}`,
+  transactionsByUser: (userId: string) => `transactions:user:${userId}`,
+  transactionsSummary: (userId: string) => `transactions:user:${userId}:summary`,
+
+  holding: (id: string) => `portfolio:${id}`,
+  portfolioByUser: (userId: string) => `portfolio:user:${userId}`,
+
+  dietaryLog: (id: string) => `dietary:${id}`,
+  dietaryByUser: (userId: string) => `dietary:user:${userId}`,
+  dietaryByUserDate: (userId: string, date: string) => `dietary:user:${userId}:date:${date}`,
 };
