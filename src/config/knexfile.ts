@@ -1,10 +1,11 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import type { Knex } from 'knex';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..', '..');
+dotenv.config({ path: resolve(root, '.env') });
 
 const connection: Knex.PgConnectionConfig = {
   host: process.env.DB_HOST,

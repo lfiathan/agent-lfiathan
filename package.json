@@ -12,7 +12,11 @@
     "migrate": "tsx node_modules/.bin/knex --knexfile src/config/knexfile.ts migrate:latest",
     "migrate:rollback": "tsx node_modules/.bin/knex --knexfile src/config/knexfile.ts migrate:rollback",
     "migrate:make": "tsx node_modules/.bin/knex --knexfile src/config/knexfile.ts migrate:make",
-    "seed": "tsx node_modules/.bin/knex --knexfile src/config/knexfile.ts seed:run"
+    "seed": "tsx node_modules/.bin/knex --knexfile src/config/knexfile.ts seed:run",
+    "import:transactions:emails": "tsx src/jobs/transaction-email-import.job.ts",
+    "cron:install:transaction-email-import": "bash scripts/install-cron-transaction-email-import.sh",
+    "report:weekly:financial-audit": "tsx src/jobs/weekly-financial-audit.job.ts",
+    "cron:install:weekly-financial-audit": "bash scripts/install-cron-weekly-financial-audit.sh"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.2",
