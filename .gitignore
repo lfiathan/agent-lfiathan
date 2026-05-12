@@ -11,6 +11,7 @@ build/
 coverage/
 hermes/
 .claude/
+reports/
 
 # MCP build artifacts
 mcp/*/dist/
