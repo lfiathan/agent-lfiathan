@@ -12,6 +12,7 @@ import taskRoutes from './modules/tasks/task.routes.js';
 import transactionRoutes from './modules/finance/transaction.routes.js';
 import portfolioRoutes from './modules/finance/portfolio.routes.js';
 import dietaryRoutes from './modules/dietary/dietary.routes.js';
+import stravaRoutes from './modules/strava/strava.routes.js';
 
 export async function buildApp(opts: { logLevel?: string } = {}) {
   const fastify = Fastify({
@@ -67,6 +68,7 @@ export async function buildApp(opts: { logLevel?: string } = {}) {
   await fastify.register(transactionRoutes, { prefix: '/api/transactions' });
   await fastify.register(portfolioRoutes, { prefix: '/api/portfolio' });
   await fastify.register(dietaryRoutes, { prefix: '/api/dietary' });
+  await fastify.register(stravaRoutes, { prefix: '/api/strava' });
 
   return fastify;
 }

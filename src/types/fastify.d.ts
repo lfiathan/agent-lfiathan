@@ -19,6 +19,10 @@ export interface AppConfig {
     keyPrefix: string;
     defaultTTL: number;
   };
+  strava: {
+    clientId: string;
+    clientSecret: string;
+  };
 }
 
 declare module 'fastify' {
