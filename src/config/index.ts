@@ -23,6 +23,11 @@ const config: AppConfig = {
     keyPrefix: process.env.REDIS_KEY_PREFIX || 'lfiathan:',
     defaultTTL: parseInt(process.env.REDIS_DEFAULT_TTL ?? '300', 10),
   },
+
+  strava: {
+    clientId: process.env.STRAVA_CLIENT_ID || '',
+    clientSecret: process.env.STRAVA_CLIENT_SECRET || '',
+  },
 };
 
 /** Validate required config in production */
