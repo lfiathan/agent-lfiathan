@@ -1,6 +1,6 @@
 import 'dotenv/config';
 
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 
 type Candidate = {
@@ -31,6 +31,7 @@ type PendingFile = {
 const BASE_DIR = resolve(process.env.TX_EMAIL_IMPORT_LOG_DIR ?? '/opt/agent-lfiathan/logs/email-import');
 const PENDING_DIR = resolve(BASE_DIR, 'pending-approvals');
 const REVIEW_DIR = resolve(BASE_DIR, 'review-reports');
+const IMPORT_LOG_FILE = resolve(BASE_DIR, 'transaction-email-import.log');
 const TZ = process.env.TZ ?? 'Asia/Jakarta';
 
 async function latestJsonFile(dir: string): Promise<string | null> {
@@ -56,6 +57,27 @@ function fmtWib(iso?: string): string {
   }).format(d) + ' WIB';
 }
 
+async function latestImportCompletedAt(): Promise<Date | null> {
+  try {
+    const raw = await readFile(IMPORT_LOG_FILE, 'utf8');
+    const lines = raw.trim().split('\n').reverse();
+    for (const line of lines) {
+      try {
+        const row = JSON.parse(line) as { ts?: string; event?: string };
+        if (row.event === 'run_completed' && row.ts) {
+          const d = new Date(row.ts);
+          if (!Number.isNaN(d.getTime())) return d;
+        }
+      } catch {
+        // skip malformed log lines
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 async function main(): Promise<void> {
   await mkdir(REVIEW_DIR, { recursive: true });
 
@@ -68,6 +90,23 @@ async function main(): Promise<void> {
 
   const raw = await readFile(latest, 'utf8');
   const payload = JSON.parse(raw) as PendingFile;
+
+  const latestImportAt = await latestImportCompletedAt();
+  if (latestImportAt) {
+    const artifactStat = await stat(latest);
+    if (artifactStat.mtime.getTime() + 1000 < latestImportAt.getTime()) {
+      process.stdout.write(`${JSON.stringify({
+        status: 'ok',
+        message: 'No current approval review artifact; latest approval artifact predates latest import run',
+        latestImportCompletedAt: latestImportAt.toISOString(),
+        staleSource: latest,
+        reviewReport: null,
+        stale: true,
+      })}\n`);
+      return;
+    }
+  }
+
   const candidates = payload.candidates ?? [];
 
   let incomeCount = 0;

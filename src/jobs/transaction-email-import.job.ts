@@ -203,7 +203,7 @@ async function runGapi(args: string[]): Promise<string> {
 async function fetchGmailMessages(): Promise<GmailMessage[]> {
   const query = [
     '(transaction OR transaksi OR pembayaran OR payment OR invoice OR receipt OR billed OR debit OR credit OR transfer)',
-    'newer_than:2d',
+    'newer_than:1d',
   ].join(' ');
 
   const searchRaw = await runGapi(['gmail', 'search', query, '--max', String(MAX_EMAILS_PER_RUN)]);

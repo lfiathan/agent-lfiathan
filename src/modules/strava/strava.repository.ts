@@ -2,6 +2,7 @@ import type { Knex } from 'knex';
 
 const CONNECTIONS_TABLE = 'strava_connections';
 const ACTIVITIES_TABLE = 'strava_activities';
+const NOTIFICATIONS_TABLE = 'strava_activity_notifications';
 
 export interface StravaConnection {
   id: string;
@@ -46,6 +47,10 @@ export class StravaRepository {
     return this.knex(CONNECTIONS_TABLE).where({ user_id: userId }).first();
   }
 
+  async findConnectionByAthleteId(athleteId: number): Promise<StravaConnection | undefined> {
+    return this.knex(CONNECTIONS_TABLE).where({ athlete_id: athleteId }).first();
+  }
+
   async upsertConnection(data: UpsertStravaConnectionDTO): Promise<StravaConnection> {
     const [row] = await this.knex(CONNECTIONS_TABLE)
       .insert(data)
@@ -83,5 +88,24 @@ export class StravaRepository {
       });
 
     return activities.length;
+  }
+
+  async findLatestActivity(userId: string): Promise<StravaActivityDTO | undefined> {
+    return this.knex(ACTIVITIES_TABLE).where({ user_id: userId }).orderBy('start_date', 'desc').first();
+  }
+
+  async markNotificationSent(data: {
+    user_id: string;
+    strava_activity_id: number;
+    event_type: string;
+    payload: Record<string, unknown>;
+  }): Promise<boolean> {
+    const inserted = await this.knex(NOTIFICATIONS_TABLE)
+      .insert(data)
+      .onConflict(['strava_activity_id', 'event_type'])
+      .ignore()
+      .returning('id');
+
+    return inserted.length > 0;
   }
 }

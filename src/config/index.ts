@@ -27,6 +27,9 @@ const config: AppConfig = {
   strava: {
     clientId: process.env.STRAVA_CLIENT_ID || '',
     clientSecret: process.env.STRAVA_CLIENT_SECRET || '',
+    webhookVerifyToken: process.env.STRAVA_WEBHOOK_VERIFY_TOKEN || process.env.STRAVA_ANALYSIS_WEBHOOK_VERIFY_TOKEN || '',
+    analysisTelegramBotToken: process.env.STRAVA_ANALYSIS_TELEGRAM_BOT_TOKEN || '',
+    analysisTelegramChatId: process.env.STRAVA_ANALYSIS_TELEGRAM_CHAT_ID || '',
   },
 };
 

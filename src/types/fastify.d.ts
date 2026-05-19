@@ -22,6 +22,9 @@ export interface AppConfig {
   strava: {
     clientId: string;
     clientSecret: string;
+    webhookVerifyToken: string;
+    analysisTelegramBotToken: string;
+    analysisTelegramChatId: string;
   };
 }
 

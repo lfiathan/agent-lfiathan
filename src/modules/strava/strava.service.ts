@@ -6,6 +6,7 @@ import {
   type StravaConnection,
   type StravaActivityDTO,
 } from './strava.repository.js';
+import { buildStravaActivityAnalysis } from './strava.analysis.js';
 
 interface StravaTokenResponse {
   token_type: string;
@@ -13,7 +14,7 @@ interface StravaTokenResponse {
   refresh_token: string;
   expires_at: number;
   scope: string;
-  athlete: {
+  athlete?: {
     id: number;
   };
 }
@@ -30,13 +31,37 @@ interface StravaActivityResponse {
   [key: string]: unknown;
 }
 
+export interface StravaWebhookEvent {
+  aspect_type: 'create' | 'update' | 'delete' | string;
+  event_time?: number;
+  object_id: number;
+  object_type: 'activity' | 'athlete' | string;
+  owner_id: number;
+  subscription_id?: number;
+  updates?: Record<string, unknown>;
+}
+
+export interface StravaWebhookResult {
+  accepted: boolean;
+  ignored?: boolean;
+  reason?: string;
+  notified?: boolean;
+  activityId?: number;
+}
+
 export class StravaService {
   private readonly repo: StravaRepository;
 
   constructor(
     knex: Knex,
     _redis: Redis,
-    private readonly config: { clientId: string; clientSecret: string; redirectUri?: string }
+    private readonly config: {
+      clientId: string;
+      clientSecret: string;
+      redirectUri?: string;
+      telegramBotToken?: string;
+      telegramChatId?: string;
+    }
   ) {
     this.repo = new StravaRepository(knex);
   }
@@ -70,6 +95,10 @@ export class StravaService {
       redirect_uri: redirectUri,
     });
 
+    if (!token.athlete?.id) {
+      throw new ValidationError('Strava authorization response did not include athlete id');
+    }
+
     return this.repo.upsertConnection({
       user_id: params.userId,
       athlete_id: token.athlete.id,
@@ -94,7 +123,7 @@ export class StravaService {
 
     return this.repo.upsertConnection({
       user_id: userId,
-      athlete_id: token.athlete.id,
+      athlete_id: token.athlete?.id ?? conn.athlete_id,
       access_token: token.access_token,
       refresh_token: token.refresh_token,
       expires_at: new Date(token.expires_at * 1000).toISOString(),
@@ -134,8 +163,95 @@ export class StravaService {
     }
 
     const data = (await response.json()) as StravaActivityResponse[];
+    const mapped = data.map((activity) => this.mapActivity(userId, activity));
 
-    const mapped: StravaActivityDTO[] = data.map((activity) => ({
+    const synced = await this.repo.upsertActivities(mapped);
+    return { synced };
+  }
+
+  async syncActivityById(userId: string, activityId: number): Promise<StravaActivityDTO> {
+    const activity = await this.fetchActivityById(userId, activityId);
+    const mapped = this.mapActivity(userId, activity);
+    await this.repo.upsertActivities([mapped]);
+    return mapped;
+  }
+
+  async analyzeLatestActivity(userId: string): Promise<{ activity?: StravaActivityDTO; analysis?: string }> {
+    const activity = await this.repo.findLatestActivity(userId);
+    if (!activity) return {};
+    return { activity, analysis: buildStravaActivityAnalysis(activity) };
+  }
+
+  async handleWebhookEvent(event: StravaWebhookEvent): Promise<StravaWebhookResult> {
+    if (event.object_type !== 'activity') {
+      return { accepted: true, ignored: true, reason: 'non_activity_event' };
+    }
+
+    if (!['create', 'update'].includes(event.aspect_type)) {
+      return { accepted: true, ignored: true, reason: `unsupported_aspect_${event.aspect_type}` };
+    }
+
+    const conn = await this.repo.findConnectionByAthleteId(event.owner_id);
+    if (!conn) {
+      return { accepted: true, ignored: true, reason: 'unknown_athlete' };
+    }
+
+    const activity = await this.fetchActivityByIdWithRetry(conn.user_id, event.object_id);
+    const mapped = this.mapActivity(conn.user_id, activity);
+    await this.repo.upsertActivities([mapped]);
+
+    const eventType = event.aspect_type === 'create' ? 'create' : 'update';
+    const shouldNotify = await this.repo.markNotificationSent({
+      user_id: conn.user_id,
+      strava_activity_id: mapped.strava_activity_id,
+      event_type: eventType,
+      payload: event as unknown as Record<string, unknown>,
+    });
+
+    if (!shouldNotify) {
+      return { accepted: true, ignored: true, reason: 'already_notified', activityId: mapped.strava_activity_id };
+    }
+
+    const analysis = buildStravaActivityAnalysis(mapped);
+    await this.sendTelegramNotification(analysis);
+
+    return { accepted: true, notified: Boolean(this.config.telegramBotToken && this.config.telegramChatId), activityId: mapped.strava_activity_id };
+  }
+
+  private async fetchActivityByIdWithRetry(userId: string, activityId: number): Promise<StravaActivityResponse> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      try {
+        return await this.fetchActivityById(userId, activityId);
+      } catch (error) {
+        lastError = error;
+        await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
+      }
+    }
+    throw lastError;
+  }
+
+  private async fetchActivityById(userId: string, activityId: number): Promise<StravaActivityResponse> {
+    const conn = await this.ensureValidConnection(userId);
+    const url = new URL(`https://www.strava.com/api/v3/activities/${activityId}`);
+    url.searchParams.set('include_all_efforts', 'false');
+
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${conn.access_token}`,
+      },
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new ValidationError(`Failed to fetch Strava activity ${activityId}: ${response.status} ${text}`);
+    }
+
+    return (await response.json()) as StravaActivityResponse;
+  }
+
+  private mapActivity(userId: string, activity: StravaActivityResponse): StravaActivityDTO {
+    return {
       user_id: userId,
       strava_activity_id: activity.id,
       name: activity.name,
@@ -146,10 +262,28 @@ export class StravaService {
       total_elevation_gain_m: activity.total_elevation_gain ?? 0,
       start_date: activity.start_date,
       raw: activity as unknown as Record<string, unknown>,
-    }));
+    };
+  }
 
-    const synced = await this.repo.upsertActivities(mapped);
-    return { synced };
+  private async sendTelegramNotification(message: string): Promise<void> {
+    if (!this.config.telegramBotToken || !this.config.telegramChatId) {
+      return;
+    }
+
+    const response = await fetch(`https://api.telegram.org/bot${this.config.telegramBotToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: this.config.telegramChatId,
+        text: message,
+        disable_web_page_preview: true,
+      }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new ValidationError(`Failed to send Strava analysis notification: ${response.status} ${text}`);
+    }
   }
 
   private async ensureValidConnection(userId: string): Promise<StravaConnection> {

@@ -18,6 +18,7 @@
     "money:monthly:rollup": "tsx src/jobs/money-monthly-rollup.job.ts",
     "cron:install:transaction-email-import": "bash scripts/install-cron-transaction-email-import.sh",
     "report:weekly:financial-audit": "tsx src/jobs/weekly-financial-audit.job.ts",
+    "report:weekly:marathon-readiness": "node scripts/marathon-readiness-report.mjs",
     "cron:install:weekly-financial-audit": "bash scripts/install-cron-weekly-financial-audit.sh"
   },
   "dependencies": {
