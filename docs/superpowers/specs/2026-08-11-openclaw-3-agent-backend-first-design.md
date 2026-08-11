@@ -20,7 +20,7 @@ Semua poin di bawah diverifikasi langsung di server, bukan disimpulkan dari kode
 | Penyebab | `deploy.yml` memanggil `dist/node_modules/.bin/knex` (tidak ada); `\|\| echo` menelan kegagalannya tiap deploy. |
 | `/health` | Hijau, karena hanya menguji koneksi — tidak pernah menyentuh skema. |
 | Import email | Tidak pernah berfungsi di sini. Memanggil `google_api.py` yang tidak ada, butuh Python yang tidak ada di container, tanpa kredensial Google, tanpa `TX_EMAIL_IMPORT_*` di `.env`. |
-| OpenClaw | v2026.7.1-2. Gateway jalan sebagai proses lepas di port 18789 — **bukan** systemd unit, mati saat reboot. |
+| OpenClaw | v2026.7.1-2. Gateway berjalan sebagai **systemd user service** (`openclaw-gateway.service`), enabled, dengan `Linger=yes` — jadi selamat dari reboot. |
 | Agent | `openclaw.json` hanya punya `agents.defaults`, **tanpa `agents.list`**. Hanya `main` yang hidup. `agents/finance/` cuma sqlite kosong sisa percobaan. |
 | Telegram | Satu bot, `dmPolicy: "open"`, `allowFrom: ["*"]`, `tools.profile: "coding"`, workspace `/home/lfiathan`, tanpa sandbox. |
 | Auth API | `AGENT_API_KEYS` tidak diset, jadi seluruh `/api/*` terbuka. `src/common/auth.ts` sudah ditulis tapi belum di-commit. |
@@ -86,8 +86,21 @@ Gmail. Tanpa `exec`, sandbox per-agent kehilangan pekerjaannya — dan VPS
 
 3. Jalankan 9 migrasi di produksi.
 
-**Selesai bila:** `\dt` menampilkan 9 tabel, `migrate:status` melaporkan 0 pending,
-dan `/health` tetap `200`.
+**Selesai bila:** `migrate:status` melaporkan 0 pending, tabel domain ada, dan
+`/health` tetap `200`.
+
+**SELESAI 2026-08-11.** `migrate:latest` menjalankan `Batch 1 run: 9 migrations`.
+`migrate:status` kini melaporkan 9 completed / 0 pending, dan `\dt` menampilkan
+10 relasi — 8 tabel domain (`users`, `tasks`, `transactions`,
+`portfolio_holdings`, `dietary_logs`, `strava_activities`, `strava_connections`,
+`strava_activity_notifications`) plus `knex_migrations` dan
+`knex_migrations_lock`. Kriteria awal menyebut "9 tabel"; itu keliru menyamakan
+jumlah migrasi dengan jumlah tabel — dua migrasi mengubah tabel yang sudah ada
+alih-alih membuat yang baru.
+
+Diverifikasi end-to-end, bukan sekadar keberadaan tabel:
+`GET /api/transactions/user/<uuid>` mengembalikan `{"data":[]}` HTTP 200, yang
+sebelumnya mustahil karena relasinya belum ada. Container tetap `healthy`.
 
 ---
 
@@ -205,9 +218,12 @@ berturut-turut tidak menambah baris duplikat; email yang gagal diurai mendarat d
 
 ## 6. Fase 4 — Tiga agent
 
-1. **Tutup lubang Telegram.** `dmPolicy: "allowlist"`, `allowFrom` berisi hanya
-   Telegram user ID pemilik. Ini boleh dan sebaiknya dikerjakan lebih dulu,
-   terlepas dari fase lain.
+1. ~~**Tutup lubang Telegram.**~~ **SELESAI 2026-08-11.** `dmPolicy` diubah dari
+   `"open"` ke `"allowlist"` dan `allowFrom` dari `["*"]` ke `["tg:5829448496"]`,
+   lewat `openclaw config patch --stdin` (dry-run dulu, dengan backup
+   `openclaw.json.pre-dmpolicy`). ID diverifikasi sebagai satu-satunya peer yang
+   pernah ada dengan query langsung ke `state/openclaw.sqlite`. Gateway di-restart
+   dan `openclaw doctor` mengonfirmasi mode allowlist aktif.
 2. **`agents.list`** sesuai draf, dengan penyesuaian D6 — Kara tanpa `exec`,
    tanpa `sandbox`. Marcus tetap `deepseek-v4-flash`; Kara `deepseek-v4-pro`.
 3. **Tiga bot Telegram**, satu per agent, plus `bindings` yang memetakan
@@ -216,7 +232,9 @@ berturut-turut tidak menambah baris duplikat; email yang gagal diurai mendarat d
    sendiri dari Fase 2. Skill bersifat per-workspace sehingga tetap terisolasi
    antar-agent — berbeda dari konfigurasi MCP tingkat gateway yang justru dibagi.
 5. **`agentToAgent: { enabled: false }`** dipertahankan.
-6. **systemd unit** untuk gateway, supaya selamat dari reboot.
+6. ~~**systemd unit** untuk gateway.~~ Tidak diperlukan — sudah terpasang sebagai
+   systemd user service dengan lingering aktif. Bila perlu dikelola, gunakan
+   `openclaw gateway install|start|stop|restart|status`, bukan unit buatan tangan.
 
 **Selesai bila:** pesan ke tiap bot dijawab agent yang benar; Kara menolak
 pertanyaan latihan dan Marcus menolak pertanyaan uang; kunci Marcus ditolak 403
@@ -259,5 +277,5 @@ Tiga hal yang tidak boleh dikerjakan agen otomatis:
 | --- | --- |
 | Migrasi gagal di tengah pada DB produksi | DB kosong, jadi tidak ada data yang bisa hilang. Ini justru waktu teraman untuk menjalankannya. |
 | Menyalakan auth memutus pemanggil yang ada | `PUBLIC_PATHS` diperbaiki lebih dulu (§4.2); webhook Strava diuji sebelum dan sesudah. |
-| Restart gateway kehilangan kredensial DeepSeek | Kunci tidak ada di env proses maupun `credentials/`, jadi gateway jelas membacanya dari disk. Tetap: uji satu pesan segera setelah restart. |
+| Restart gateway kehilangan kredensial DeepSeek | Gateway sudah di-restart 2026-08-11 tanpa error, `Connectivity probe: ok`. Lokasi kunci tetap belum ditemukan — tidak ada di env proses, unit systemd, `credentials/`, blok `auth` di config, maupun tabel `auth_profile_*` di sqlite (keduanya nol baris). Belum terbukti lewat panggilan model nyata; uji satu pesan Telegram untuk memastikan. |
 | Ekstraksi LLM memasukkan angka salah ke buku besar | Tidak pernah `INSERT` langsung — selalu lewat `pending-approvals`. |

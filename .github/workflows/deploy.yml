@@ -108,9 +108,13 @@ jobs:
 
             # ── Run database migrations ──
             echo "→ Running database migrations..."
-            docker compose exec -T app node dist/node_modules/.bin/knex \
-              --knexfile dist/src/config/knexfile.js \
-              migrate:latest || echo "⚠ Migration failed or no pending migrations"
+            # node_modules lives at /app/node_modules, not under dist/. The old
+            # path threw MODULE_NOT_FOUND, and the trailing `|| echo` swallowed
+            # it, so migrations silently never ran. A failure here must fail the
+            # deploy.
+            docker compose exec -T app node /app/node_modules/.bin/knex \
+              --knexfile /app/dist/src/config/knexfile.js \
+              migrate:latest
 
             # ── Health check ──
             echo "→ Running health check..."

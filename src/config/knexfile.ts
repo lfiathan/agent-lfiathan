@@ -1,10 +1,17 @@
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { dirname, extname, resolve } from 'node:path';
 import type { Knex } from 'knex';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 const root = resolve(__dirname, '..', '..');
+
+// Load migrations whose extension matches this file's own: '.ts' when running
+// from source, '.js' once compiled. Hardcoding '.js' would break local runs,
+// and leaving it unset makes knex treat the emitted .d.ts declarations as
+// migrations — they export no up(), so migrate:latest dies on the first one.
+const migrationExtension = extname(__filename);
 dotenv.config({ path: resolve(root, '.env') });
 
 const connection: Knex.PgConnectionConfig = {
@@ -25,6 +32,7 @@ const commonConfig: Knex.Config = {
   migrations: {
     directory: resolve(root, 'database', 'migrations'),
     tableName: 'knex_migrations',
+    loadExtensions: [migrationExtension],
   },
   seeds: {
     directory: resolve(root, 'database', 'seeds'),
