@@ -27,6 +27,25 @@ export type FetchOptions = {
   mailbox?: string;
 };
 
+/**
+ * Flatten HTML mail to text.
+ *
+ * Style and script blocks are dropped before tags are stripped. Removing tags
+ * alone leaves the CSS *inside* <style> in the output, which is how a Shopee
+ * shipping notice arrived as ".base_font { font-family: Helvetica ... }" and
+ * fed stylesheet numbers to the amount regexes.
+ */
+function htmlToText(html: string | false | undefined): string {
+  if (!html) return '';
+  return String(html)
+    .replace(/<(style|script|head)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function headerAddress(value: unknown): string | undefined {
   if (!value) return undefined;
   const v = value as { text?: string };
@@ -73,9 +92,7 @@ export async function fetchRecentMessages(
       // generation, which is the best available guarantee.
       const id = parsed.messageId?.trim() || `uid:${mailbox}:${message.uid}`;
 
-      const body = parsed.text?.trim()
-        || parsed.html?.toString().replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-        || '';
+      const body = parsed.text?.trim() || htmlToText(parsed.html) || '';
 
       messages.push({
         id,
