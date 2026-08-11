@@ -35,7 +35,9 @@ git -C "${APP_DIR}" checkout "${BRANCH}"
 git -C "${APP_DIR}" pull --ff-only origin "${BRANCH}"
 
 if [ ! -f "${ENV_FILE}" ]; then
-  cat > "${ENV_FILE}" <<'EOF'
+  GENERATED_DB_PASSWORD="$(openssl rand -base64 24)"
+
+  cat > "${ENV_FILE}" <<EOF
 NODE_ENV=production
 PORT=3000
 HOST=0.0.0.0
@@ -45,7 +47,7 @@ LOG_LEVEL=info
 DB_HOST=postgres
 DB_PORT=5432
 DB_USER=lfiathan
-DB_PASSWORD=MeandHERMESDB13
+DB_PASSWORD=${GENERATED_DB_PASSWORD}
 DB_NAME=agent_lfiathan
 
 # Redis
@@ -58,9 +60,12 @@ HERMES_API_URL=http://hermes:8642
 HERMES_MODEL=minimax/minimax-m2.5:free
 HERMES_TIMEOUT=30000
 
+# Per-agent API keys (see AGENT_API_KEYS in .env.example) — generate each with:
+#   openssl rand -hex 32
 EOF
   chmod 600 "${ENV_FILE}"
-  echo "Created ${ENV_FILE}. Update secrets before running."
+  echo "Created ${ENV_FILE} with a freshly generated DB_PASSWORD."
+  echo "Update HERMES/AGENT_API_KEYS secrets before running if needed."
 fi
 
 cd "${APP_DIR}"
