@@ -6,6 +6,7 @@ import config from './config/index.js';
 import databasePlugin from './plugins/database.js';
 import redisPlugin from './plugins/redis.js';
 import { registerErrorHandler, registerRequestHooks } from './common/hooks.js';
+import { registerApiKeyAuth } from './common/auth.js';
 
 import userRoutes from './modules/users/user.routes.js';
 import taskRoutes from './modules/tasks/task.routes.js';
@@ -37,6 +38,7 @@ export async function buildApp(opts: { logLevel?: string } = {}) {
   // ── Hooks ────────────────────────────────────────
   registerErrorHandler(fastify);
   registerRequestHooks(fastify);
+  registerApiKeyAuth(fastify);
 
   // ── Health check ─────────────────────────────────
   fastify.get('/health', async () => {

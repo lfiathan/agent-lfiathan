@@ -1,0 +1,142 @@
+// ~/.openclaw/openclaw.json  — multi-agent block
+//
+// Merge this into your existing config. Do NOT paste wholesale over it;
+// dump what you have first:  openclaw config get  >  ~/openclaw.json.bak
+//
+// Three agents, three Telegram bots, one gateway process.
+// Each agent has its own workspace, session store, auth, and tool policy.
+
+{
+  agents: {
+    defaults: {
+      model: {
+        primary: "deepseek/deepseek-v4-pro",
+        failover: ["deepseek/deepseek-v4-flash"],
+      },
+    },
+
+    list: [
+      // ---------------------------------------------------------------
+      // 1. LFIATHAN — general personal assistant. Full trust, full tools.
+      // ---------------------------------------------------------------
+      {
+        id: "main",
+        default: true,
+        name: "Lfiathan",
+        // Leave this matching your CURRENT workspace. Verify with:
+        //   openclaw config get agents.defaults.workspace
+        workspace: "~/",
+        agentDir: "~/.openclaw/agents/main/agent",
+        // no tools block = all tools available
+      },
+
+      // ---------------------------------------------------------------
+      // 2. FINANCE — email + portfolio only. Tightest tool policy.
+      //    This agent reads untrusted input (email), so it gets no exec.
+      // ---------------------------------------------------------------
+      {
+        id: "finance",
+        name: "Kara",
+        workspace: "~/.openclaw/workspace-finance",
+        agentDir: "~/.openclaw/agents/finance/agent",
+        model: {
+          primary: "deepseek/deepseek-v4-pro",
+          failover: ["deepseek/deepseek-v4-flash"],
+        },
+        tools: {
+          allow: [
+            "read",
+            "write",          // maintains portfolio notes in its workspace
+            "exec",           // REQUIRED by gogcli (Gmail access is a CLI binary)
+            "web_search",     // quotes, filings, rates
+            "memory_search",
+            "sessions_history",
+          ],
+          deny: [
+            "edit",
+            "apply_patch",
+            "browser",
+            "canvas",
+            "nodes",
+            "cron",
+          ],
+        },
+        // NON-NEGOTIABLE for this agent. `exec` had to be allowed for gogcli,
+        // so the container is the only remaining boundary between a malicious
+        // email and your host. Do not set mode:"off" here.
+        sandbox: {
+          mode: "all",
+          scope: "agent",
+          docker: {
+            setupCommand: "apt-get update && apt-get install -y curl ca-certificates",
+          },
+        },
+      },
+
+      // ---------------------------------------------------------------
+      // 3. TRAINER — diet and training log. Cheap model, minimal tools.
+      // ---------------------------------------------------------------
+      {
+        id: "trainer",
+        name: "Marcus",
+        workspace: "~/.openclaw/workspace-trainer",
+        agentDir: "~/.openclaw/agents/trainer/agent",
+        model: {
+          // Flash is plenty for logging and coaching. ~8x cheaper.
+          primary: "deepseek/deepseek-v4-flash",
+        },
+        tools: {
+          allow: ["read", "write", "web_search", "memory_search"],
+          deny: ["exec", "edit", "apply_patch", "browser", "canvas", "nodes", "cron"],
+        },
+        sandbox: {
+          mode: "all",
+          scope: "agent",
+        },
+      },
+    ],
+  },
+
+  // -------------------------------------------------------------------
+  // One Telegram bot per agent. Create each with @BotFather -> /newbot
+  // -------------------------------------------------------------------
+  channels: {
+    telegram: {
+      enabled: true,
+      defaultAccount: "default",
+      accounts: {
+        default: {
+          botToken: "TOKEN_LFIATHAN",
+          dmPolicy: "allowlist",
+          allowFrom: ["tg:YOUR_TELEGRAM_USER_ID"],
+        },
+        finance: {
+          botToken: "TOKEN_FINANCE",
+          dmPolicy: "allowlist",
+          allowFrom: ["tg:YOUR_TELEGRAM_USER_ID"],
+        },
+        trainer: {
+          botToken: "TOKEN_TRAINER",
+          dmPolicy: "allowlist",
+          allowFrom: ["tg:YOUR_TELEGRAM_USER_ID"],
+        },
+      },
+    },
+  },
+
+  // -------------------------------------------------------------------
+  // Bindings map each bot to its agent. Deterministic, first match wins.
+  // -------------------------------------------------------------------
+  bindings: [
+    { agentId: "finance", match: { channel: "telegram", accountId: "finance" } },
+    { agentId: "trainer", match: { channel: "telegram", accountId: "trainer" } },
+    { agentId: "main",    match: { channel: "telegram", accountId: "default" } },
+  ],
+
+  // Keep agents from talking to each other unless you explicitly want it.
+  tools: {
+    agentToAgent: {
+      enabled: false,
+    },
+  },
+}

@@ -1,5 +1,16 @@
 import type { AppConfig } from '../types/fastify.js';
 
+function parseAgentApiKeys(): AppConfig['agentApiKeys'] {
+  const raw = process.env.AGENT_API_KEYS;
+  if (!raw) return {};
+
+  try {
+    return JSON.parse(raw) as AppConfig['agentApiKeys'];
+  } catch {
+    throw new Error('AGENT_API_KEYS must be valid JSON, e.g. {"finance":{"key":"...","scopes":["/api/transactions"]}}');
+  }
+}
+
 const config: AppConfig = {
   env: process.env.NODE_ENV || 'development',
   port: parseInt(process.env.PORT ?? '3000', 10),
@@ -31,6 +42,8 @@ const config: AppConfig = {
     analysisTelegramBotToken: process.env.STRAVA_ANALYSIS_TELEGRAM_BOT_TOKEN || '',
     analysisTelegramChatId: process.env.STRAVA_ANALYSIS_TELEGRAM_CHAT_ID || '',
   },
+
+  agentApiKeys: parseAgentApiKeys(),
 };
 
 /** Validate required config in production */
