@@ -61,6 +61,9 @@ services:
     volumes:
       - ./src:/app/src:ro
       - ./database:/app/database:ro
+      # Import artifacts must outlive the container: pending-approvals is the
+      # audit trail the review job reads, not scratch output.
+      - ./logs:/app/logs
     networks:
       - lfiathan-net
     deploy:

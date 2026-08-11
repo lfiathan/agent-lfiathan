@@ -10,10 +10,10 @@ import { extractTransactionFields, isLlmExtractConfigured } from '../services/ll
 
 type TxType = 'income' | 'expense';
 
-/** One email the rule-based parser could not read, staged for approval. */
+/** An email that must not go straight into the ledger, staged for approval. */
 type Candidate = {
   messageId: string;
-  source: 'llm-fallback';
+  source: 'llm-fallback' | 'untrusted-sender';
   parsed: {
     amount: number;
     currency: string;
@@ -47,6 +47,8 @@ type RunStats = {
   stagedForApprovalCount: number;
   skippedDuplicates: number;
   parsingFailures: number;
+  /** Separate from parsingFailures: the email parsed, the user did not resolve. */
+  unresolvedUsers: number;
   authIssues: number;
   fetchFailures: number;
 };
@@ -59,6 +61,31 @@ const LOG_FILE = resolve(LOG_DIR, 'transaction-email-import.log');
 const PENDING_DIR = resolve(LOG_DIR, 'pending-approvals');
 const IMAP_USER = process.env.GMAIL_IMAP_USER ?? process.env.TX_EMAIL_IMPORT_USER_EMAIL ?? '';
 const IMAP_PASSWORD = process.env.GMAIL_IMAP_APP_PASSWORD ?? '';
+
+/**
+ * Only mail from these domains is written straight to the ledger.
+ *
+ * Sender turned out to be the strongest quality signal by a wide margin. Bank
+ * notifications state one amount for one transaction. Marketing mail from
+ * e-commerce does not: a voucher blast parsed as Rp4 income, a monthly spend
+ * recap as Rp248.93 income, and "order shipped" plus "order received" for a
+ * single purchase produced two rows with different Message-IDs, so the
+ * fingerprint could not collapse them. Everything outside this list is staged
+ * for approval instead of inserted.
+ */
+const TRUSTED_SENDER_DOMAINS = (process.env.TX_EMAIL_IMPORT_TRUSTED_SENDERS
+  ?? 'bca.co.id,bankmandiri.co.id,bni.co.id,bri.co.id,permatabank.com')
+  .split(',')
+  .map((d) => d.trim().toLowerCase())
+  .filter(Boolean);
+
+function isTrustedSender(sender: string | null): boolean {
+  const address = parseEmailAddress(sender ?? undefined);
+  if (!address) return false;
+  const domain = address.split('@')[1] ?? '';
+  // Suffix match so notification.bca.co.id counts, but notbca.co.id does not.
+  return TRUSTED_SENDER_DOMAINS.some((d) => domain === d || domain.endsWith(`.${d}`));
+}
 
 const TRANSACTION_KEYWORDS = [
   'transaction', 'transaksi', 'payment', 'pembayaran', 'invoice', 'receipt',
@@ -134,9 +161,22 @@ function normalizeDate(dateRaw: string | undefined, fallbackIso: string): string
   return parsed.toISOString();
 }
 
+/**
+ * Keywords must match whole words.
+ *
+ * A plain substring test flags every Strava notification as a transaction,
+ * because "va" — the Indonesian banking abbreviation for virtual account —
+ * appears inside "Strava". It also hits "available", "private" and
+ * "advantage". As a standalone word the keyword is fine; as a substring it
+ * swamps the importer with false positives.
+ */
+const TRANSACTION_KEYWORD_REGEX = new RegExp(
+  `\\b(${TRANSACTION_KEYWORDS.map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`,
+  'i'
+);
+
 function containsTransactionKeyword(text: string): boolean {
-  const lower = text.toLowerCase();
-  return TRANSACTION_KEYWORDS.some((k) => lower.includes(k));
+  return TRANSACTION_KEYWORD_REGEX.test(text);
 }
 
 function inferType(text: string): TxType {
@@ -287,6 +327,7 @@ async function main(): Promise<void> {
     stagedForApprovalCount: 0,
     skippedDuplicates: 0,
     parsingFailures: 0,
+    unresolvedUsers: 0,
     authIssues: 0,
     fetchFailures: 0,
   };
@@ -365,9 +406,48 @@ async function main(): Promise<void> {
         continue;
       }
 
+      if (!isTrustedSender(parsed.sender)) {
+        // Read cleanly, but not by a bank. A confident number from marketing
+        // mail is the failure mode that actually corrupts the ledger, so this
+        // is staged for approval rather than inserted. When an LLM is
+        // configured its verdict is preferred, since it can recognise a
+        // promotion or a monthly summary that the regexes cannot.
+        const verdict = isLlmExtractConfigured()
+          ? await extractTransactionFields({
+            subject: parsed.subject,
+            from: parsed.sender,
+            body: parsed.rawEmailContent,
+          })
+          : null;
+
+        candidates.push({
+          messageId: msg.id,
+          source: 'untrusted-sender',
+          parsed: {
+            amount: verdict?.amount ?? parsed.amount,
+            currency: verdict?.currency ?? parsed.currency,
+            inferredType: verdict?.inferredType ?? parsed.inferredType,
+            subject: parsed.subject,
+            gmailDateRaw: msg.date,
+          },
+          from: parsed.sender,
+          referenceNumber: verdict?.referenceNumber ?? parsed.referenceNumber,
+          merchantVendor: verdict?.merchantVendor ?? parsed.merchantVendor,
+          confidence: verdict?.confidence ?? 0,
+        });
+        stats.stagedForApprovalCount += 1;
+        await writeLog('staged_untrusted_sender', {
+          messageId: msg.id,
+          subject: parsed.subject,
+          from: parsed.sender,
+          llmConfidence: verdict?.confidence ?? null,
+        });
+        continue;
+      }
+
       const userId = await resolveTargetUserId(db, msg);
       if (!userId) {
-        stats.parsingFailures += 1;
+        stats.unresolvedUsers += 1;
         await writeLog('user_resolution_failed', { messageId: msg.id, to: msg.to ?? null });
         continue;
       }
