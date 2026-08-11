@@ -16,3 +16,11 @@ reports/
 # MCP build artifacts
 mcp/*/dist/
 mcp/*/node_modules/
+
+# Email import artifacts — bind-mounted to /app/logs in docker-compose.
+# These hold real transaction data: amounts, senders, subjects, order numbers.
+# This repository is public; they must never be committed.
+logs/
+
+# AppleDouble files, created when copying from macOS over tar/scp
+._*
