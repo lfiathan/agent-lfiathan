@@ -86,8 +86,21 @@ Gmail. Tanpa `exec`, sandbox per-agent kehilangan pekerjaannya — dan VPS
 
 3. Jalankan 9 migrasi di produksi.
 
-**Selesai bila:** `\dt` menampilkan 9 tabel, `migrate:status` melaporkan 0 pending,
-dan `/health` tetap `200`.
+**Selesai bila:** `migrate:status` melaporkan 0 pending, tabel domain ada, dan
+`/health` tetap `200`.
+
+**SELESAI 2026-08-11.** `migrate:latest` menjalankan `Batch 1 run: 9 migrations`.
+`migrate:status` kini melaporkan 9 completed / 0 pending, dan `\dt` menampilkan
+10 relasi — 8 tabel domain (`users`, `tasks`, `transactions`,
+`portfolio_holdings`, `dietary_logs`, `strava_activities`, `strava_connections`,
+`strava_activity_notifications`) plus `knex_migrations` dan
+`knex_migrations_lock`. Kriteria awal menyebut "9 tabel"; itu keliru menyamakan
+jumlah migrasi dengan jumlah tabel — dua migrasi mengubah tabel yang sudah ada
+alih-alih membuat yang baru.
+
+Diverifikasi end-to-end, bukan sekadar keberadaan tabel:
+`GET /api/transactions/user/<uuid>` mengembalikan `{"data":[]}` HTTP 200, yang
+sebelumnya mustahil karena relasinya belum ada. Container tetap `healthy`.
 
 ---
 
