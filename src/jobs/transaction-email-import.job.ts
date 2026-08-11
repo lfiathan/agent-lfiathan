@@ -1,26 +1,30 @@
 import 'dotenv/config';
 
 import { createHash } from 'node:crypto';
-import { mkdir, appendFile } from 'node:fs/promises';
+import { mkdir, appendFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { promisify } from 'node:util';
-import { execFile as execFileCb } from 'node:child_process';
 import knex from 'knex';
 import config from '../config/index.js';
+import { fetchRecentMessages, type GmailMessage } from '../services/gmail-imap.service.js';
+import { extractTransactionFields, isLlmExtractConfigured } from '../services/llm-extract.service.js';
 
 type TxType = 'income' | 'expense';
 
-type GmailEnvelope = {
-  id: string;
-  from?: string;
-  to?: string;
-  subject?: string;
-  date?: string;
-};
-
-type GmailMessage = GmailEnvelope & {
-  body?: string;
-  threadId?: string;
+/** One email the rule-based parser could not read, staged for approval. */
+type Candidate = {
+  messageId: string;
+  source: 'llm-fallback';
+  parsed: {
+    amount: number;
+    currency: string;
+    inferredType: TxType;
+    subject: string;
+    gmailDateRaw?: string;
+  };
+  from: string | null;
+  referenceNumber: string | null;
+  merchantVendor: string | null;
+  confidence: number;
 };
 
 type ParsedTransaction = {
@@ -40,21 +44,21 @@ type ParsedTransaction = {
 type RunStats = {
   processedEmailCount: number;
   insertedTransactionCount: number;
+  stagedForApprovalCount: number;
   skippedDuplicates: number;
   parsingFailures: number;
   authIssues: number;
   fetchFailures: number;
 };
 
-const execFile = promisify(execFileCb);
 const SOURCE_SYSTEM = 'gmail';
 const MAX_EMAILS_PER_RUN = Number.parseInt(process.env.TX_EMAIL_IMPORT_MAX_EMAILS ?? '200', 10);
+const LOOKBACK_DAYS = Number.parseInt(process.env.TX_EMAIL_IMPORT_LOOKBACK_DAYS ?? '1', 10);
 const LOG_DIR = resolve(process.env.TX_EMAIL_IMPORT_LOG_DIR ?? '/opt/agent-lfiathan/logs/email-import');
 const LOG_FILE = resolve(LOG_DIR, 'transaction-email-import.log');
-const PYTHON_BIN = process.env.PYTHON_BIN ?? 'python3';
-const GAPI_SCRIPT =
-  process.env.GOOGLE_API_SCRIPT ??
-  '/root/.hermes/skills/productivity/google-workspace/scripts/google_api.py';
+const PENDING_DIR = resolve(LOG_DIR, 'pending-approvals');
+const IMAP_USER = process.env.GMAIL_IMAP_USER ?? process.env.TX_EMAIL_IMPORT_USER_EMAIL ?? '';
+const IMAP_PASSWORD = process.env.GMAIL_IMAP_APP_PASSWORD ?? '';
 
 const TRANSACTION_KEYWORDS = [
   'transaction', 'transaksi', 'payment', 'pembayaran', 'invoice', 'receipt',
@@ -192,35 +196,50 @@ function makeFingerprint(account: string, messageId: string, parsed: ParsedTrans
   return createHash('sha256').update(payload).digest('hex');
 }
 
-async function runGapi(args: string[]): Promise<string> {
-  const { stdout } = await retry(() => execFile(PYTHON_BIN, [GAPI_SCRIPT, ...args], {
-    env: process.env,
-    maxBuffer: 1024 * 1024 * 8,
-  }), 3, 1200);
-  return stdout;
-}
-
+/**
+ * Pull recent mail over IMAP.
+ *
+ * The old Gmail-API path filtered by keyword server-side. IMAP has no
+ * equivalent worth the complexity, so the window is narrowed by date here and
+ * parseTransaction() applies TRANSACTION_KEYWORDS to whatever comes back —
+ * the same list the server query used.
+ */
 async function fetchGmailMessages(): Promise<GmailMessage[]> {
-  const query = [
-    '(transaction OR transaksi OR pembayaran OR payment OR invoice OR receipt OR billed OR debit OR credit OR transfer)',
-    'newer_than:1d',
-  ].join(' ');
-
-  const searchRaw = await runGapi(['gmail', 'search', query, '--max', String(MAX_EMAILS_PER_RUN)]);
-  const envelopes = JSON.parse(searchRaw) as GmailEnvelope[];
-
-  const messages: GmailMessage[] = [];
-  for (const env of envelopes) {
-    if (!env.id) continue;
-    try {
-      const raw = await runGapi(['gmail', 'get', env.id]);
-      messages.push(JSON.parse(raw) as GmailMessage);
-    } catch {
-      // handled in caller with fetch failure increment
-    }
+  if (!IMAP_USER || !IMAP_PASSWORD) {
+    throw new Error(
+      'GMAIL_IMAP_USER and GMAIL_IMAP_APP_PASSWORD must be set (Google app password, not the account password)'
+    );
   }
 
-  return messages;
+  return retry(
+    () => fetchRecentMessages(
+      { user: IMAP_USER, password: IMAP_PASSWORD },
+      { sinceDays: LOOKBACK_DAYS, max: MAX_EMAILS_PER_RUN }
+    ),
+    3,
+    1200
+  );
+}
+
+/**
+ * Persist candidates where transaction-email-review.job.ts looks for them.
+ * That job only considers files ending in .processed.json or .approved.json.
+ */
+async function writePendingApprovals(
+  runId: string,
+  stats: RunStats,
+  candidates: Candidate[]
+): Promise<string | null> {
+  if (!candidates.length) return null;
+
+  await mkdir(PENDING_DIR, { recursive: true });
+  const outPath = resolve(PENDING_DIR, `${runId}.processed.json`);
+  await writeFile(
+    outPath,
+    `${JSON.stringify({ runId, generatedAt: new Date().toISOString(), stats, candidates }, null, 2)}\n`,
+    { encoding: 'utf8' }
+  );
+  return outPath;
 }
 
 function parseEmailAddress(raw: string | undefined): string | null {
@@ -259,9 +278,13 @@ async function writeLog(event: string, payload: Record<string, unknown>): Promis
 }
 
 async function main(): Promise<void> {
+  const runId = new Date().toISOString().replace(/[:.]/g, '-');
+  const candidates: Candidate[] = [];
+
   const stats: RunStats = {
     processedEmailCount: 0,
     insertedTransactionCount: 0,
+    stagedForApprovalCount: 0,
     skippedDuplicates: 0,
     parsingFailures: 0,
     authIssues: 0,
@@ -299,6 +322,44 @@ async function main(): Promise<void> {
       if (!parsed) continue;
 
       if (!parsed.amount || !parsed.currency) {
+        // The rule-based parser could not read this one. Hand the already
+        // fetched text to a single LLM pass and stage the result for approval.
+        // It is never inserted directly: the call is non-deterministic, and
+        // source_fingerprint only guarantees exactly-once when the parse
+        // feeding it is reproducible.
+        const extracted = isLlmExtractConfigured()
+          ? await extractTransactionFields({
+            subject: parsed.subject,
+            from: parsed.sender,
+            body: parsed.rawEmailContent,
+          })
+          : null;
+
+        if (extracted && extracted.confidence > 0) {
+          candidates.push({
+            messageId: msg.id,
+            source: 'llm-fallback',
+            parsed: {
+              amount: extracted.amount,
+              currency: extracted.currency,
+              inferredType: extracted.inferredType,
+              subject: parsed.subject,
+              gmailDateRaw: msg.date,
+            },
+            from: parsed.sender,
+            referenceNumber: extracted.referenceNumber,
+            merchantVendor: extracted.merchantVendor,
+            confidence: extracted.confidence,
+          });
+          stats.stagedForApprovalCount += 1;
+          await writeLog('staged_for_approval', {
+            messageId: msg.id,
+            subject: parsed.subject,
+            confidence: extracted.confidence,
+          });
+          continue;
+        }
+
         stats.parsingFailures += 1;
         await writeLog('parse_failed', { messageId: msg.id, subject: msg.subject ?? '' });
         continue;
@@ -350,8 +411,11 @@ async function main(): Promise<void> {
       stats.insertedTransactionCount += 1;
     }
 
-    await writeLog('run_completed', stats as unknown as Record<string, unknown>);
-    process.stdout.write(`${JSON.stringify({ status: 'ok', ...stats })}\n`);
+    const pendingFile = await writePendingApprovals(runId, stats, candidates);
+    if (pendingFile) await writeLog('staged_file_written', { runId, pendingFile });
+
+    await writeLog('run_completed', { ...stats, runId } as unknown as Record<string, unknown>);
+    process.stdout.write(`${JSON.stringify({ status: 'ok', runId, pendingFile, ...stats })}\n`);
   } catch (err) {
     await writeLog('run_failed', {
       ...stats,
