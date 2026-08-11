@@ -108,15 +108,27 @@ sebelumnya mustahil karena relasinya belum ada. Container tetap `healthy`.
 
 **Perubahan.**
 
-1. Commit dan deploy pekerjaan yang menggantung: `src/common/auth.ts`,
-   `src/app.ts`, `src/config/index.ts`, `src/types/fastify.d.ts`.
+1. ~~Commit dan deploy pekerjaan yang menggantung.~~ Sudah masuk lewat PR #3.
 
-2. **Tambahkan `/api/strava/webhook` ke `PUBLIC_PATHS`.** Ini wajib, bukan opsional.
-   Endpoint itu dipanggil server Strava — GET untuk verifikasi langganan, POST
-   untuk event — dan Strava tidak bisa mengirim header `x-api-key`. Menyalakan
-   auth tanpa ini membuat webhook kena 401 diam-diam sampai Strava mencabut
-   langganannya. Endpoint tersebut sudah punya otentikasinya sendiri lewat
-   `hub.verify_token`, jadi membukanya tidak menambah risiko.
+2. ~~**Tambahkan `/api/strava/webhook` ke `PUBLIC_PATHS`.**~~ **DIBATALKAN.**
+   Premisnya salah. Pemeriksaan server menunjukkan tidak ada reverse proxy —
+   hanya port 22, 3000, 5432, 6379 yang listen, dan tiga terakhir difilter Azure
+   NSG dari internet. `STRAVA_REDIRECT_URI` juga kosong. **Strava tidak punya
+   jalan untuk menjangkau webhook ini**, jadi tidak ada langganan hidup yang bisa
+   rusak oleh 401.
+
+   Lebih penting: `PUBLIC_PATHS` mencocokkan path tanpa memandang method, jadi
+   membukanya akan membuka `GET` **dan** `POST`. `GET /webhook` punya pengaman
+   sendiri (`hub.verify_token`), tetapi `POST /webhook`
+   (`strava.routes.ts:96`) tidak memeriksa apa pun sebelum memproses body
+   menjadi event — membukanya berarti menerima event palsu dari siapa pun yang
+   bisa menjangkau port itu.
+
+   Keputusan: **biarkan tertutup.** Bila webhook nanti benar-benar diekspos,
+   pembuatan langganan gagal keras di verifikasi GET dan langsung terlihat —
+   jauh lebih baik daripada membuka endpoint POST tanpa verifikasi hari ini.
+   Prasyarat saat itu: tambahkan `PUBLIC_PATHS` **dan** beri `POST /webhook`
+   validasi miliknya sendiri (mis. cek `subscription_id`).
 
 3. Isi `AGENT_API_KEYS` di `.env` produksi. `auth.ts` mencocokkan **path penuh**
    (`path === scope || path.startsWith(scope + '/')`), jadi scope harus ditulis
@@ -132,8 +144,30 @@ sebelumnya mustahil karena relasinya belum ada. Container tetap `healthy`.
    server, tidak pernah melewati chat.
 
 **Selesai bila:** tanpa kunci → 401; kunci Marcus ke `/api/transactions` → 403;
-kunci Kara ke `/api/transactions` → 200; `GET /api/strava/webhook` dengan
-`hub.verify_token` benar → 200 tanpa kunci.
+kunci Kara ke `/api/transactions` → 200.
+
+**SELESAI 2026-08-11.** Sepuluh kasus diuji di produksi, semuanya sesuai:
+
+| Kasus | Kode |
+| --- | --- |
+| `/health` tanpa kunci | 200 |
+| `/api/tasks` tanpa kunci | 401 |
+| `/api/tasks` kunci ngawur | 401 |
+| `/api/strava/webhook` tanpa kunci | 401 *(tertutup, sesuai keputusan di atas)* |
+| marcus → `/api/transactions/user/<uuid>` | 403 |
+| kara → `/api/dietary/user/<uuid>` | 403 |
+| kara → `/api/transactions/user/<uuid>` | 200 |
+| marcus → `/api/dietary/user/<uuid>` | 200 |
+| lfiathan → `/api/tasks` | 200 |
+
+Kunci dibuat dengan `secrets.token_hex(32)` langsung di server dan ditulis ke
+`.env`; nilainya tidak pernah melewati chat. Karena `.env` ada di `.gitignore`
+dan deploy tidak menyentuhnya, konfigurasi ini bertahan melintasi deploy tanpa
+perubahan kode apa pun.
+
+Ditemukan sambil jalan: `.env` produksi ber-permission `-rw-rw-r--`
+(world-readable) padahal memuat seluruh rahasia — kondisi lama, bukan akibat
+perubahan ini. Sudah diubah ke `600`, termasuk backup `.env.pre-agentkeys`.
 
 ---
 
