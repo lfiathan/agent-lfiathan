@@ -1,7 +1,21 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm run *)"
+      "WebSearch",
+      "Bash(xargs -I{} echo {})",
+      "mcp__plugin_chronicle-memory_chronicle__memory_search",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3999/health)",
+      "Bash(curl -s http://localhost:3999/api/transactions)",
+      "Bash(curl -s -H \"x-api-key: bogus-key\" http://localhost:3999/api/transactions)",
+      "Bash(curl -s -H \"x-api-key: finance-key-123\" http://localhost:3999/api/transactions)",
+      "Bash(curl -s -H \"x-api-key: finance-key-123\" http://localhost:3999/api/dietary)",
+      "Bash(curl -s -w \"\\\\nHTTP:%{http_code}\\\\n\" -H \"x-api-key: finance-key-123\" http://localhost:3999/api/transactions/user/00000000-0000-0000-0000-000000000000)",
+      "mcp__plugin_chronicle-memory_chronicle__memory_store",
+      "Bash(ssh vps:*)",
+      "Bash(ssh -o BatchMode=yes -o ConnectTimeout=10 vps:*)"
     ]
+  },
+  "enabledPlugins": {
+    "chronicle-memory@chronicle": true
   }
 }
