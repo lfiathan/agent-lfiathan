@@ -26,6 +26,7 @@ export interface AppConfig {
     analysisTelegramBotToken: string;
     analysisTelegramChatId: string;
   };
+  agentApiKeys: Record<string, { key: string; scopes: string[] }>;
 }
 
 declare module 'fastify' {
