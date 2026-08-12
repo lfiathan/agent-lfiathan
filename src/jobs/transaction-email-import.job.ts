@@ -126,7 +126,9 @@ const INCOME_HINTS = [
 ];
 
 const CURRENCY_REGEX = /(IDR|Rp\.?|USD|EUR|SGD|JPY|GBP)\s*([0-9][0-9.,\s]{0,30})|([0-9][0-9.,\s]{0,30})\s*(IDR|USD|EUR|SGD|JPY|GBP)/i;
-const REFERENCE_REGEX = /(?:reference|ref(?:erence)?(?:\s*no)?|invoice(?:\s*no)?|receipt(?:\s*no)?|trx(?:\s*id)?|transaction(?:\s*id)?|nomor\s*referensi|no\.?\s*ref)\s*[:#-]?\s*([A-Z0-9\-]{4,})/i;
+const TOTAL_PAYMENT_REGEX =
+  /(?:total\s*(?:payment|pembayaran|tagihan|debit)|jumlah\s*total|grand\s*total)\s*[:\-]?\s*(IDR|Rp\.?|USD)?\s*([0-9][0-9.,\s]{0,30})/i;
+const REFERENCE_REGEX =/(?:reference|ref(?:erence)?(?:\s*no)?|invoice(?:\s*no)?|receipt(?:\s*no)?|trx(?:\s*id)?|transaction(?:\s*id)?|nomor\s*referensi|no\.?\s*ref)\s*[:#-]?\s*([A-Z0-9\-]{4,})/i;
 const PAYMENT_METHOD_REGEX = /(?:payment\s*method|metode\s*pembayaran|paid\s*via|via)\s*[:#-]?\s*([A-Za-z0-9\-\s]{3,40})/i;
 const MERCHANT_REGEX = /(?:merchant|vendor|to|kepada|at)\s*[:#-]?\s*([A-Za-z0-9.&\-\s]{3,80})/i;
 
@@ -240,6 +242,16 @@ function parseTransaction(message: GmailMessage): ParsedTransaction | null {
   if (amountMatch) {
     currency = amountMatch[1] || amountMatch[4] || null;
     amountRaw = amountMatch[2] || amountMatch[3] || '';
+  }
+
+  // BCA states three figures in this order: Amount, Admin Fee, Total Payment.
+  // The first currency match is the amount before fees, so a 98,000 top up
+  // that debited 99,000 was recorded 1,000 short. What left the account is the
+  // total, so it wins whenever the mail states one.
+  const totalMatch = haystack.match(TOTAL_PAYMENT_REGEX);
+  if (totalMatch) {
+    currency = totalMatch[1] || currency;
+    amountRaw = totalMatch[2] || amountRaw;
   }
 
   const amount = amountRaw ? parseAmount(amountRaw) : null;

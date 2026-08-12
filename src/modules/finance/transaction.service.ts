@@ -8,6 +8,7 @@ import {
   type ListFilters,
   type SummaryFilters,
   type SummaryRow,
+  type BalanceResult,
 } from './transaction.repository.js';
 import { CacheService, CacheKeys } from '../../services/cache.service.js';
 import { NotFoundError } from '../../common/errors.js';
@@ -64,6 +65,10 @@ export class TransactionService {
     await this.repo.delete(id);
     await this.invalidate(id, existing.user_id);
     return true;
+  }
+
+  async balanceForUser(userId: string, currency = 'IDR'): Promise<BalanceResult> {
+    return this.repo.balanceForUser(userId, currency);
   }
 
   async summarizeByUser(userId: string, filters: SummaryFilters = {}): Promise<SummaryRow[]> {

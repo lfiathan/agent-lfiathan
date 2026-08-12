@@ -34,6 +34,21 @@ const tools = [
     },
   },
   {
+    name: "ledger_balance",
+    description:
+      "What he actually has. Use this for any question about balance or how much is left — " +
+      "never sum the whole ledger, which only sees outflows and always reads hugely negative. " +
+      "Counts forward from the last self-reported saldo-awal anchor and excludes transfers. " +
+      "If anchoredAt is null there is no anchor and the balance is unknown; say so.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        currency: { type: "string" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: "ledger_summary",
     description: "Totals per type and currency over an optional date range.",
     inputSchema: {
@@ -145,6 +160,11 @@ async function dispatch(name: string, args: Json): Promise<Json> {
           to: args.to,
           limit: args.limit,
         })}`
+      );
+
+    case "ledger_balance":
+      return call(
+        `/api/transactions/user/${USER_ID}/balance${query({ currency: args.currency })}`
       );
 
     case "ledger_summary":
