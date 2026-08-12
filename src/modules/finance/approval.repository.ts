@@ -8,7 +8,7 @@ export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 export interface ApprovalPayload {
   amount: number;
   currency: string;
-  inferredType: 'income' | 'expense';
+  inferredType: 'income' | 'expense' | 'transfer';
   subject: string;
   from: string | null;
   referenceNumber: string | null;

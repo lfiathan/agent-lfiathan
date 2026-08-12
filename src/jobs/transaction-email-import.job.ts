@@ -8,7 +8,7 @@ import { makeTransactionFingerprint } from '../common/transaction-fingerprint.js
 import { fetchRecentMessages, type GmailMessage } from '../services/gmail-imap.service.js';
 import { extractTransactionFields, isLlmExtractConfigured } from '../services/llm-extract.service.js';
 
-type TxType = 'income' | 'expense';
+type TxType = 'income' | 'expense' | 'transfer';
 
 /** An email that must not go straight into the ledger, staged for approval. */
 type Candidate = {
@@ -94,6 +94,26 @@ const TRANSACTION_KEYWORDS = [
   'paid', 'tagihan', 'billing', 'purchase', 'order', 'debit', 'credit', 'transfer',
   'refund', 'withdrawal', 'top up', 'topup', 'e-wallet', 'wallet', 'va', 'virtual account',
 ];
+
+/**
+ * Money moving between the owner's own accounts, not money spent.
+ *
+ * A BCA e-wallet top up says "Transaction Type : e-Wallet - GOPAY TOPUP". Left
+ * as an expense it double counts: once when the balance moves, again when he
+ * actually spends it from the wallet.
+ */
+const INTERNAL_TRANSFER_REGEX =
+  /transaction\s*type\s*:\s*e-?wallet|e-?wallet\s*[-–]\s*[A-Za-z]+\s*top\s?up|top\s?up\s+(gopay|ovo|dana|shopeepay|linkaja)/i;
+
+/**
+ * Indonesian bank notices name the counterparty under "Penerima".
+ *
+ * Presence alone does not give direction — an incoming transfer names the
+ * owner as the recipient. Direction comes from WHO it names, which is why the
+ * owner's name is compared rather than the keyword merely being found.
+ */
+const RECIPIENT_REGEX = /\bpenerima\b\s*:?\s*([A-Za-z0-9 .'&-]{2,60})/i;
+const OWNER_NAME = (process.env.TX_EMAIL_IMPORT_OWNER_NAME ?? '').trim().toLowerCase();
 
 const EXPENSE_HINTS = [
   'payment', 'pembayaran', 'debit', 'purchase', 'paid to', 'you paid', 'tagihan', 'invoice',
@@ -183,6 +203,21 @@ function containsTransactionKeyword(text: string): boolean {
 
 function inferType(text: string): TxType {
   const lower = text.toLowerCase();
+
+  // Checked before anything else: a top up reads as a payment to every other
+  // rule here, and calling it one is what made moving money look like losing
+  // money.
+  if (INTERNAL_TRANSFER_REGEX.test(text)) return 'transfer';
+
+  // A named recipient settles direction more reliably than keyword hints do.
+  // Mandiri transfer notices contain the word diterima, which the income hints
+  // match, so every outgoing transfer was landing as income.
+  const recipient = text.match(RECIPIENT_REGEX)?.[1]?.trim().toLowerCase();
+  if (recipient) {
+    if (OWNER_NAME && recipient.startsWith(OWNER_NAME)) return 'income';
+    return 'expense';
+  }
+
   if (INCOME_HINTS.some((k) => lower.includes(k))) return 'income';
   if (EXPENSE_HINTS.some((k) => lower.includes(k))) return 'expense';
   return 'expense';

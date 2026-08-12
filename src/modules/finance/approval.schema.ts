@@ -1,5 +1,5 @@
 const STATUSES = ['pending', 'approved', 'rejected'] as const;
-const TYPES = ['income', 'expense'] as const;
+const TYPES = ['income', 'expense', 'transfer'] as const;
 
 export type ApprovalStatusInput = (typeof STATUSES)[number];
 
