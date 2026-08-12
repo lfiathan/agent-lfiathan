@@ -11,6 +11,7 @@ import { registerApiKeyAuth } from './common/auth.js';
 import userRoutes from './modules/users/user.routes.js';
 import taskRoutes from './modules/tasks/task.routes.js';
 import transactionRoutes from './modules/finance/transaction.routes.js';
+import approvalRoutes from './modules/finance/approval.routes.js';
 import portfolioRoutes from './modules/finance/portfolio.routes.js';
 import dietaryRoutes from './modules/dietary/dietary.routes.js';
 import stravaRoutes from './modules/strava/strava.routes.js';
@@ -67,6 +68,10 @@ export async function buildApp(opts: { logLevel?: string } = {}) {
   // ── Routes ───────────────────────────────────────
   await fastify.register(userRoutes, { prefix: '/api/users' });
   await fastify.register(taskRoutes, { prefix: '/api/tasks' });
+  // Nested under /api/transactions so the finance agent's existing scope
+  // covers it. Static segments win over the parametric /:id in that module,
+  // so the two do not collide.
+  await fastify.register(approvalRoutes, { prefix: '/api/transactions/approvals' });
   await fastify.register(transactionRoutes, { prefix: '/api/transactions' });
   await fastify.register(portfolioRoutes, { prefix: '/api/portfolio' });
   await fastify.register(dietaryRoutes, { prefix: '/api/dietary' });

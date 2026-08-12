@@ -1,10 +1,10 @@
 import 'dotenv/config';
 
-import { createHash } from 'node:crypto';
 import { mkdir, appendFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import knex from 'knex';
 import config from '../config/index.js';
+import { makeTransactionFingerprint } from '../common/transaction-fingerprint.js';
 import { fetchRecentMessages, type GmailMessage } from '../services/gmail-imap.service.js';
 import { extractTransactionFields, isLlmExtractConfigured } from '../services/llm-extract.service.js';
 
@@ -45,6 +45,8 @@ type RunStats = {
   processedEmailCount: number;
   insertedTransactionCount: number;
   stagedForApprovalCount: number;
+  /** Already approved or rejected in a previous run, so not staged again. */
+  skippedDecided: number;
   skippedDuplicates: number;
   parsingFailures: number;
   /** Separate from parsingFailures: the email parsed, the user did not resolve. */
@@ -224,16 +226,15 @@ function parseTransaction(message: GmailMessage): ParsedTransaction | null {
 }
 
 function makeFingerprint(account: string, messageId: string, parsed: ParsedTransaction): string {
-  const payload = [
-    SOURCE_SYSTEM,
+  return makeTransactionFingerprint({
+    sourceSystem: SOURCE_SYSTEM,
     account,
     messageId,
-    parsed.amount ?? '',
-    parsed.currency ?? '',
-    parsed.transactionDate ?? '',
-    parsed.referenceNumber ?? '',
-  ].join('|');
-  return createHash('sha256').update(payload).digest('hex');
+    amount: parsed.amount,
+    currency: parsed.currency,
+    transactionDate: parsed.transactionDate,
+    referenceNumber: parsed.referenceNumber,
+  });
 }
 
 /**
@@ -259,6 +260,48 @@ async function fetchGmailMessages(): Promise<GmailMessage[]> {
     3,
     1200
   );
+}
+
+/**
+ * Record a candidate in transaction_approvals, the authoritative queue.
+ *
+ * The JSON artifact next to it is a report input; this row is what carries a
+ * decision. onConflict-ignore on (source_system, source_message_id) keeps a
+ * re-import from resurrecting something already judged.
+ */
+async function stageApproval(
+  db: ReturnType<typeof knex>,
+  args: {
+    userId: string;
+    account: string;
+    messageId: string;
+    candidate: Candidate;
+    occurredAt: string | null;
+    reason: Candidate['source'];
+  }
+): Promise<void> {
+  await db('transaction_approvals')
+    .insert({
+      user_id: args.userId,
+      source_system: SOURCE_SYSTEM,
+      source_account: args.account,
+      source_message_id: args.messageId,
+      status: 'pending',
+      reason: args.reason,
+      confidence: args.candidate.confidence,
+      payload: {
+        amount: args.candidate.parsed.amount,
+        currency: args.candidate.parsed.currency,
+        inferredType: args.candidate.parsed.inferredType,
+        subject: args.candidate.parsed.subject,
+        from: args.candidate.from,
+        referenceNumber: args.candidate.referenceNumber,
+        merchantVendor: args.candidate.merchantVendor,
+        occurredAt: args.occurredAt,
+      },
+    })
+    .onConflict(['source_system', 'source_message_id'])
+    .ignore();
 }
 
 /**
@@ -325,6 +368,7 @@ async function main(): Promise<void> {
     processedEmailCount: 0,
     insertedTransactionCount: 0,
     stagedForApprovalCount: 0,
+    skippedDecided: 0,
     skippedDuplicates: 0,
     parsingFailures: 0,
     unresolvedUsers: 0,
@@ -348,6 +392,14 @@ async function main(): Promise<void> {
     await mkdir(LOG_DIR, { recursive: true });
     await writeLog('run_started', { maxEmails: MAX_EMAILS_PER_RUN });
 
+    const decidedMessageIds = new Set<string>(
+      (await db('transaction_approvals')
+        .where({ source_system: SOURCE_SYSTEM })
+        .whereNot({ status: 'pending' })
+        .select('source_message_id')
+      ).map((r: { source_message_id: string }) => r.source_message_id)
+    );
+
     let messages: GmailMessage[] = [];
     try {
       messages = await fetchGmailMessages();
@@ -361,6 +413,25 @@ async function main(): Promise<void> {
       stats.processedEmailCount += 1;
       const parsed = parseTransaction(msg);
       if (!parsed) continue;
+
+      // A message already approved or rejected must not come back. Without
+      // this, every run restages the same candidates and the queue never
+      // empties, no matter how many decisions have been made.
+      if (decidedMessageIds.has(msg.id)) {
+        stats.skippedDecided += 1;
+        continue;
+      }
+
+      // Resolved before the branches below because staging needs an owner
+      // too: transaction_approvals.user_id is NOT NULL.
+      const userId = await resolveTargetUserId(db, msg);
+      if (!userId) {
+        stats.unresolvedUsers += 1;
+        await writeLog('user_resolution_failed', { messageId: msg.id, to: msg.to ?? null });
+        continue;
+      }
+
+      const account = parseEmailAddress(msg.to) ?? parseEmailAddress(msg.from) ?? 'unknown';
 
       if (!parsed.amount || !parsed.currency) {
         // The rule-based parser could not read this one. Hand the already
@@ -377,7 +448,7 @@ async function main(): Promise<void> {
           : null;
 
         if (extracted && extracted.confidence > 0) {
-          candidates.push({
+          const candidate: Candidate = {
             messageId: msg.id,
             source: 'llm-fallback',
             parsed: {
@@ -391,6 +462,15 @@ async function main(): Promise<void> {
             referenceNumber: extracted.referenceNumber,
             merchantVendor: extracted.merchantVendor,
             confidence: extracted.confidence,
+          };
+          candidates.push(candidate);
+          await stageApproval(db, {
+            userId,
+            account,
+            messageId: msg.id,
+            candidate,
+            occurredAt: extracted.transactionDate ?? parsed.transactionDate,
+            reason: 'llm-fallback',
           });
           stats.stagedForApprovalCount += 1;
           await writeLog('staged_for_approval', {
@@ -420,7 +500,7 @@ async function main(): Promise<void> {
           })
           : null;
 
-        candidates.push({
+        const candidate: Candidate = {
           messageId: msg.id,
           source: 'untrusted-sender',
           parsed: {
@@ -434,6 +514,15 @@ async function main(): Promise<void> {
           referenceNumber: verdict?.referenceNumber ?? parsed.referenceNumber,
           merchantVendor: verdict?.merchantVendor ?? parsed.merchantVendor,
           confidence: verdict?.confidence ?? 0,
+        };
+        candidates.push(candidate);
+        await stageApproval(db, {
+          userId,
+          account,
+          messageId: msg.id,
+          candidate,
+          occurredAt: verdict?.transactionDate ?? parsed.transactionDate,
+          reason: 'untrusted-sender',
         });
         stats.stagedForApprovalCount += 1;
         await writeLog('staged_untrusted_sender', {
@@ -445,14 +534,6 @@ async function main(): Promise<void> {
         continue;
       }
 
-      const userId = await resolveTargetUserId(db, msg);
-      if (!userId) {
-        stats.unresolvedUsers += 1;
-        await writeLog('user_resolution_failed', { messageId: msg.id, to: msg.to ?? null });
-        continue;
-      }
-
-      const account = parseEmailAddress(msg.to) ?? parseEmailAddress(msg.from) ?? 'unknown';
       const fingerprint = makeFingerprint(account, msg.id, parsed);
 
       const dup = await db('transactions').where({ source_fingerprint: fingerprint }).first('id');
