@@ -24,12 +24,21 @@ to agent configuration.
 
 Isolation therefore has to come from the other end: deny the tools per agent.
 
+MCP tool names are namespaced with the server name and a **double** underscore,
+so `ledger_balance` is addressed as `ledger__ledger_balance`. Denying the bare
+name silently matches nothing — the gateway log will report the deny as applied
+while every tool stays available.
+
 ```json5
 // agents.list[] entry for an agent that must not see the ledger
-tools: { deny: ["ledger_list_transactions", "ledger_summary",
-                "ledger_list_pending_approvals",
-                "ledger_approve_candidate", "ledger_reject_candidate"] }
+tools: { deny: ["ledger__ledger_list_transactions", "ledger__ledger_balance",
+                "ledger__ledger_summary", "ledger__ledger_list_pending_approvals",
+                "ledger__ledger_approve_candidate", "ledger__ledger_reject_candidate"] }
 ```
+
+Check it landed rather than assuming: the gateway log prints
+`tool policy removed N tool(s) via agents.<id>.tools.deny: ...` with the names it
+actually matched.
 
 This is weaker than per-agent credentials: the API key lives in the gateway
 config, so a missing deny entry grants access. The server-side scope check
