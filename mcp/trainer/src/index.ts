@@ -24,7 +24,7 @@ const tools = [
   {
     name: "dietary_get_day",
     description:
-      `Read one day of food and training. Returns 404 when nothing is logged for that date. ${DAY_MODEL}`,
+      `Read one day of food and training. A day with no entry returns found:false — that is normal, not an error. ${DAY_MODEL}`,
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -143,8 +143,11 @@ async function call(path: string, init: RequestInit = {}): Promise<Json> {
     if (response.status === 403) {
       throw new Error("403 — this key is not scoped for that resource. Say so; do not retry.");
     }
+    // Deliberately NOT thrown. A day with no row is the normal case in the
+    // read-then-create flow, and surfacing it as a tool error made routine
+    // backfilling look like the tool was broken.
     if (response.status === 404) {
-      throw new Error("404 — nothing logged for that day yet.");
+      return { found: false, note: "No log exists for that day yet — create one." };
     }
     throw new Error(`${response.status} — ${text.slice(0, 300)}`);
   }
