@@ -1,4 +1,6 @@
-const TYPES = ['income', 'expense'] as const;
+// 'transfer' covers money moving between the owner's own accounts. It is a
+// real ledger row but not spending, so summaries can exclude it by type.
+const TYPES = ['income', 'expense', 'transfer'] as const;
 
 export type TransactionType = (typeof TYPES)[number];
 

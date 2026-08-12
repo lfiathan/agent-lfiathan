@@ -57,6 +57,15 @@ export default async function transactionRoutes(fastify: FastifyInstance): Promi
     }
   );
 
+  fastify.get(
+    '/user/:userId/balance',
+    { schema: transactionsByUserSchema },
+    async (request: FastifyRequest<{ Params: UserIdParams; Querystring: { currency?: string } }>) => {
+      const data = await service.balanceForUser(request.params.userId, request.query.currency ?? 'IDR');
+      return { data };
+    }
+  );
+
   fastify.post('/', { schema: createTransactionSchema }, async (request, reply) => {
     const tx = await service.create(request.body as CreateTransactionDTO);
     return reply.status(201).send({ data: tx });

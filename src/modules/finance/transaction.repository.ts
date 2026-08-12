@@ -58,8 +58,69 @@ export interface SummaryRow {
   count: string;
 }
 
+export interface BalanceResult {
+  anchoredAt: string | null;
+  anchorTotal: string;
+  incomeSinceAnchor: string;
+  expenseSinceAnchor: string;
+  balance: string;
+  currency: string;
+}
+
 export class TransactionRepository {
   constructor(private readonly knex: Knex) {}
+
+  /**
+   * Spendable balance, counted forward from a self-reported anchor.
+   *
+   * Summing the whole ledger gives a large negative number that means nothing:
+   * it records outflows that arrive by email, while the income — mostly family
+   * transfers — sends no email at all. Sixty days of mail produced 134 expense
+   * rows and one income row.
+   *
+   * So balance is only defined from the most recent `saldo-awal` row onward.
+   * Transfers are excluded because they move money between the owner's own
+   * accounts rather than changing what he holds.
+   *
+   * Returns anchoredAt null when no anchor exists — the caller must say the
+   * balance is unknown rather than fall back to summing everything.
+   */
+  async balanceForUser(userId: string, currency = 'IDR'): Promise<BalanceResult> {
+    const anchor = await this.knex(TABLE)
+      .where({ user_id: userId, category: 'saldo-awal', currency })
+      .max<{ at: Date | null }>({ at: 'occurred_at' })
+      .first();
+
+    const anchoredAt = anchor?.at ? new Date(anchor.at).toISOString() : null;
+
+    const zero = { anchoredAt: null, anchorTotal: '0', incomeSinceAnchor: '0', expenseSinceAnchor: '0', balance: '0', currency };
+    if (!anchoredAt) return zero;
+
+    const rows = await this.knex(TABLE)
+      .where({ user_id: userId, currency })
+      .andWhere('occurred_at', '>=', anchoredAt)
+      .whereNot({ type: 'transfer' })
+      .select('type')
+      .sum<{ total: string }>({ total: 'amount' })
+      .groupBy('type') as unknown as Array<{ type: string; total: string }>;
+
+    const anchorRow = await this.knex(TABLE)
+      .where({ user_id: userId, category: 'saldo-awal', currency })
+      .sum<{ total: string }>({ total: 'amount' })
+      .first();
+
+    const income = Number(rows.find((r) => r.type === 'income')?.total ?? 0);
+    const expense = Number(rows.find((r) => r.type === 'expense')?.total ?? 0);
+
+    return {
+      anchoredAt,
+      anchorTotal: String(anchorRow?.total ?? 0),
+      incomeSinceAnchor: String(income),
+      expenseSinceAnchor: String(expense),
+      balance: String(income - expense),
+      currency,
+    };
+  }
 
   async findById(id: string): Promise<Transaction | undefined> {
     return this.knex(TABLE).where({ id }).first();

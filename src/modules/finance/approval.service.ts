@@ -10,7 +10,7 @@ import { AppError, NotFoundError } from '../../common/errors.js';
 export interface ApproveOverrides {
   amount?: number;
   currency?: string;
-  inferredType?: 'income' | 'expense';
+  inferredType?: 'income' | 'expense' | 'transfer';
   category?: string;
   occurredAt?: string;
 }
